@@ -1,9 +1,9 @@
+**We provide English**
+---
 # Phigros Lab
 
-本地运行的 Phigros 成绩工具：**自己解析云存档**，不依赖任何 QQ 机器人；把数据变成 RKS 结构诊断、推分清单和 AI 训练计划。
-
-不联网存储、不上传。API Key 只存在浏览器 localStorage 里。
-
+本地运行的 Phigros 成绩工具：**自己解析云存档**。
+可以分析你的成绩，给出下一步建议。
 ---
 
 ## 快速开始
@@ -16,8 +16,6 @@ node proxy.js          # 打开 http://localhost:8787
 也可以直接双击 `index.html`（本地分析全都能用，只有云存档拉取和 AI 调用需要本地服务）。
 
 零依赖：不需要 `npm install`，Node 18+ 即可。`npm start` 等价于 `node proxy.js`。
-
-**部署到 GitHub Pages**：启用 Pages 指向仓库根目录就行。导入成绩、B30 分析、推分、目标规划、离线报告全是纯前端，能直接在 Pages 上跑；扫码登录、拉取云存档、AI 调用依赖本地 `proxy.js`，这几个功能会提示需要本地服务。
 
 ---
 
@@ -40,7 +38,6 @@ node phi.js login
 
 也可以手动拿：在 Phi-Plugin 等机器人里发 `#phi tk help`，按提示扫码复制。
 
-> token 是 25 位临时凭证，不是账号密码，约一个月后过期，过期就重新 `login` 一次。它明文存在 `data/.session`，别把这个文件传到公开仓库。
 
 ---
 
@@ -190,31 +187,7 @@ API Key、成绩和快照只写进浏览器 localStorage；`.save` 上传给本�
 
 本项目与 Pigeon Games 无关，仅供个人成绩分析。请勿用于批量查询或对官方服务器施压。
 
+项目由workbuddy(DS V4 Flash)完成，人工参与度不少于10%>
+
 ---
 
-## 九、发布到 GitHub
-
-仓库结构已经是可直接推送的形态，没有构建步骤、没有 `node_modules`。
-
-```bash
-cd phigros-lab
-git init
-git add .
-git commit -m "Phigros Lab: B30 analysis, push planner, AI coach"
-git branch -M main
-git remote add origin git@github.com:<你的账号>/phigros-lab.git
-git push -u origin main
-```
-
-**开启 Pages**：仓库 `Settings → Pages → Source: Deploy from a branch → Branch: main / (root)`，等一两分钟即可访问 `https://<账号>.github.io/phigros-lab/`。
-
-**推送前的检查清单**
-
-- [ ] `data/sample.save` 是真实玩家存档 —— 不想公开就删掉，并同步删掉 README 里相关段落。
-- [ ] `git status` 确认没有 `data/.session`（`.gitignore` 已排除，但换过机器后请再确认一次）。
-- [ ] 本地 `node proxy.js` 跑一遍，五个标签页都没有控制台报错。
-- [ ] 想在仓库页展示截图，把 `docs/preview.png` 放进去并在 README 顶部引用（可选）。
-
-**Pages 上能用的功能**：导入成绩（手动粘贴 / 拖 `.save` 需要本地服务）、B30 分析、推分、目标规划、离线报告、中英切换、主题切换 —— 全部是纯前端。
-
-**Pages 上用不了的功能**：扫码登录、拉取云存档、AI 调用（都依赖本机 `proxy.js` 转发，绕过 CORS 和跨域限制）。这些按钮会提示需要先运行本地服务。想在线上也能用，需要自己部署一个转发服务（Cloudflare Workers / Vercel 均可），把 `proxy.js` 里的三段转发逻辑搬过去。
