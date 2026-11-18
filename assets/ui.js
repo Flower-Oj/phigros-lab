@@ -994,6 +994,27 @@ function bindEvents() {
     $('#importMsg').className = 'msg';
     $('#importMsg').textContent = t('msg.cleared');
   });
+  // 导出 B30 分享图（概览页 + 数据页各一个入口）
+  const exportPoster = async btn => {
+    if (!S.data.length) return toast(t('toast.needData'), 'err');
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('poster.exporting');
+    try {
+      const res = await PL.exportB30Image();
+      toast(t('poster.done') + ' · ' + res.width + '×' + res.height);
+    } catch (e) {
+      toast(t('poster.fail', { e: e.message || e }), 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+  ['#b30Export', '#b30Export2'].forEach(sel => {
+    const b = $(sel);
+    if (b) b.addEventListener('click', () => exportPoster(b));
+  });
+
   $('#exportBtn').addEventListener('click', () => {
     if (!S.data.length) return toast(t('toast.noData'), 'err');
     const blob = new Blob([exportJSON()], { type: 'application/json;charset=utf-8' });

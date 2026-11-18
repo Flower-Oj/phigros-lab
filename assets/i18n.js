@@ -38,6 +38,8 @@ const D = {
   'ov.accChart': ['定数 — 准确率', 'Difficulty vs Accuracy'],
   'ov.accSub': ['每个点是一张谱；虚线是每 0.5 定数的平均准度，越陡说明高定数掉准越狠', 'One dot per chart; the dashed line is the mean accuracy per 0.5 difficulty. A steeper slope means accuracy drops off on harder charts.'],
   'ov.b30Chart': ['B30 单曲 RKS', 'B30 per-chart RKS'],
+  'ov.b30Export': ['导出图片', 'Export image'],
+  'ov.b30ExportHint': ['把前 30 首导出成一张可直接分享的 PNG', 'Export your top 30 as a shareable PNG'],
   'ov.b30Sub': ['虚线是平均单曲 RKS，右侧断崖处就是天花板', 'Dashed line is the mean chart RKS; the cliff on the right is your ceiling.'],
   'ov.rating': ['成绩档位', 'Grade mix'],
   'ov.diff': ['难度分布', 'Difficulty mix'],
@@ -374,6 +376,14 @@ const D = {
   'msg.loginErr': ['出错', 'Error'],
   'msg.acctOk': ['账号有效：{w}', 'Account valid: {w}'],
   'msg.stopped': ['已停止', 'Stopped'],
+
+  /* ---------- 分享图 ---------- */
+  'poster.noName': ['匿名玩家', 'Anonymous'],
+  'poster.records': ['记录数', 'Records'],
+  'poster.madeBy': ['由 Phigros Lab 生成', 'Made with Phigros Lab'],
+  'poster.exporting': ['生成中…', 'Rendering…'],
+  'poster.done': ['B30 图片已保存', 'B30 image saved'],
+  'poster.fail': ['图片生成失败：{e}', 'Image export failed: {e}'],
 
   /* ---------- 相对时间 ---------- */
   'time.none': ['未同步', 'not synced'],

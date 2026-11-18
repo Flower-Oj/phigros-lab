@@ -1,6 +1,6 @@
 {
   "name": "phigros-lab",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "本地解析 Phigros 云存档：B30 分析、推分规划、AI 训练建议",
   "keywords": ["phigros", "rks", "b30", "rhythm-game"],
