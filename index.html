@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phigros Lab · B30 &amp; AI Coach</title>
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="本地解析 Phigros 云存档，做 B30 分析、推分规划与 AI 训练建议 / Local Phigros save parsing, B30 analysis, push planning and AI coaching.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101219'/%3E%3Crect x='9' y='13' width='3' height='10' rx='1.5' fill='%232fe0be'/%3E%3Crect x='14.5' y='8' width='3' height='15' rx='1.5' fill='%238b6cff'/%3E%3Crect x='20' y='16' width='3' height='7' rx='1.5' fill='%23ff5d8f'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/app.css">
+<script>
+  // 在样式生效前定好主题与语言，避免闪白 / 闪中文
+  try {
+    var t = localStorage.getItem('pglab_theme');
+    if (t) document.documentElement.dataset.theme = t;
+    var l = localStorage.getItem('pglab_lang');
+    if (l) document.documentElement.lang = l === 'zh' ? 'zh-CN' : l;
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo-mark"><i></i><i></i><i></i></span>
+      <div class="brand-text">
+        <b>PHIGROS LAB</b>
+        <span data-i18n="brand.sub">B30 · 推分 · AI COACH</span>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="player-chip" id="playerChip" hidden></div>
+    <button class="icon-btn lang" id="langBtn" data-i18n-title="ui.lang" title="切换语言">
+      <span id="langLabel">中</span>
+    </button>
+    <button class="icon-btn" id="themeBtn" data-i18n-title="ui.theme" title="切换明暗主题">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+    <button class="icon-btn" id="keyBtn" data-i18n-title="ui.key" title="DeepSeek API Key">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="15" r="3.6"/><path d="M10.8 12.2 20 3m-3 3 2.5 2.5M14.5 8.5 17 11"/></svg>
+      <i class="key-dot" id="keyDot"></i>
+    </button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview" class="on"><i>01</i><span data-i18n="nav.overview">概览</span></button>
+    <button data-tab="push"><i>02</i><span data-i18n="nav.push">推分</span></button>
+    <button data-tab="plan"><i>03</i><span data-i18n="nav.plan">目标</span></button>
+    <button data-tab="ai"><i>04</i><span data-i18n="nav.ai">AI 教练</span></button>
+    <button data-tab="data"><i>05</i><span data-i18n="nav.data">数据</span></button>
+  </nav>
+
+  <main>
+    <!-- ============ 概览 ============ -->
+    <section id="tab-overview" class="tab on">
+      <div id="dataBanner"></div>
+      <div class="hero" id="hero"></div>
+      <div class="grid grid-4" id="statGrid"></div>
+
+      <div class="grid grid-2">
+        <section class="card">
+          <div class="card-head">
+            <h3 data-i18n="ov.accChart">定数 — 准确率</h3>
+            <div class="legend">
+              <span><i class="dot" style="background:var(--accent)"></i><em data-i18n="legend.below16">16 级以下</em></span>
+              <span><i class="dot" style="background:var(--rose)"></i><em data-i18n="legend.above16">16 级以上</em></span>
+              <span><i class="dot" style="background:var(--mint)"></i><em data-i18n="legend.binMean">分箱均值</em></span>
+            </div>
+          </div>
+          <p class="sub" data-i18n="ov.accSub">每个点是一张谱；虚线是每 0.5 定数的平均准度，越陡说明高定数掉准越狠</p>
+          <div class="chart" id="chartAcc"></div>
+        </section>
+        <section class="card">
+          <div class="card-head">
+            <h3 data-i18n="ov.b30Chart">B30 单曲 RKS</h3>
+            <div class="legend">
+              <span><i class="dot" style="background:var(--mint)"></i><em data-i18n="legend.top3">前三</em></span>
+              <span><i class="dot" style="background:var(--accent)"></i><em data-i18n="legend.below16">16 级以下</em></span>
+              <span><i class="dot" style="background:var(--rose)"></i><em data-i18n="legend.above16">16 级以上</em></span>
+            </div>
+          </div>
+          <p class="sub" data-i18n="ov.b30Sub">虚线是平均单曲 RKS，右侧断崖处就是天花板</p>
+          <div class="chart" id="chartB30"></div>
+        </section>
+      </div>
+
+      <div class="grid grid-3">
+        <section class="card tight">
+          <h3 data-i18n="ov.rating">成绩档位</h3>
+          <div class="chart sm" id="chartRating"></div>
+        </section>
+        <section class="card tight">
+          <h3 data-i18n="ov.diff">难度分布</h3>
+          <div class="chart sm" id="chartDiff"></div>
+        </section>
+        <section class="card tight">
+          <div class="card-head">
+            <h3 data-i18n="ov.trend">RKS 趋势</h3>
+            <button class="btn tiny" id="snapQuick" data-i18n="ov.snapshot">记录快照</button>
+          </div>
+          <div class="chart sm" id="chartTrend"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h3 data-i18n="ov.diag">本地诊断</h3>
+          <span class="hint" data-i18n="ov.diagSub">不依赖 AI 的规则引擎，先给出确定性结论</span>
+        </div>
+        <div id="diag" class="diag-list"></div>
+      </section>
+    </section>
+
+    <!-- ============ 推分 ============ -->
+    <section id="tab-push" class="tab">
+      <section class="card flush">
+        <div class="card-head pad">
+          <h3 data-i18n="push.title">推分候选</h3>
+          <div class="tools">
+            <div class="search"><input id="pushSearch" type="text" data-i18n-ph="push.search" placeholder="搜索曲名…" autocomplete="off"></div>
+            <div class="chips" id="pushDiff">
+              <button class="chip on" data-d="all" data-i18n="push.all">全部</button>
+              <button class="chip" data-d="IN">IN</button>
+              <button class="chip" data-d="AT">AT</button>
+              <button class="chip" data-d="HD">HD</button>
+            </div>
+            <select id="pushTarget" class="select">
+              <option value="99" data-i18n="push.target99">推到 99%</option>
+              <option value="99.5" selected data-i18n="push.target995">推到 99.5%</option>
+              <option value="99.9" data-i18n="push.target999">推到 99.9%</option>
+              <option value="100" data-i18n="push.target100">推到 100%</option>
+            </select>
+            <select id="pushSort" class="select">
+              <option value="gain" data-i18n="push.sortGain">按增益排序</option>
+              <option value="need" data-i18n="push.sortNeed">按所需准度排序</option>
+              <option value="const" data-i18n="push.sortConst">按定数排序</option>
+              <option value="gap" data-i18n="push.sortGap">按差距排序</option>
+            </select>
+            <label class="switch"><input id="pushOut" type="checkbox"><span></span><em data-i18n="push.includeOut">含榜外</em></label>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="pushTable"></table></div>
+        <div class="table-foot" id="pushFoot"></div>
+      </section>
+      <section class="card">
+        <h3 data-i18n="push.howto">怎么用这张表</h3>
+        <div class="note-grid">
+          <div class="note"><b data-i18n="push.noteGainT">增益</b><span data-i18n-html="push.noteGainFull">把这张谱的 acc 推到目标档位后，单曲 RKS 的净增值。综合 RKS 的涨幅约等于 <code>增益 ÷ 30</code>。</span></div>
+          <div class="note"><b data-i18n="push.noteNeedT">需要涨</b><span data-i18n="push.noteNeed">为了达标还要提升多少准度，数字越小越容易做。</span></div>
+          <div class="note"><b data-i18n="push.noteStatusT">状态</b><span data-i18n="push.noteStatus">「已进榜」提升直接计入最佳 27；「可进榜」表示推上去能挤掉第 27 名；「榜外」需先超过截断线才有意义。</span></div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ============ 目标 ============ -->
+    <section id="tab-plan" class="tab">
+      <div class="grid grid-plan">
+        <section class="card">
+          <h3 data-i18n="plan.title">目标反推</h3>
+          <p class="sub" data-i18n="plan.sub">给定目标 RKS，算出最省力的打法：改哪几张谱、各推到多少 acc</p>
+          <div class="chips" id="planPresets">
+            <button class="chip" data-add="0.05">+0.05</button>
+            <button class="chip" data-add="0.1">+0.1</button>
+            <button class="chip" data-add="0.2">+0.2</button>
+            <button class="chip" data-add="0.5">+0.5</button>
+            <button class="chip" data-add="1">+1.0</button>
+          </div>
+          <div class="fields">
+            <label class="field"><span data-i18n="plan.target">目标 RKS</span><input id="planTarget" type="number" step="0.01" min="0" max="20"></label>
+            <label class="field"><span data-i18n="plan.slots">准备改几张</span>
+              <select id="planSlots" class="select">
+                <option value="2" data-i18n="plan.slots2">2 张</option>
+                <option value="3" selected data-i18n="plan.slots3">3 张</option>
+                <option value="4" data-i18n="plan.slots4">4 张</option>
+                <option value="5" data-i18n="plan.slots5">5 张</option>
+                <option value="8" data-i18n="plan.slots8">8 张</option>
+              </select>
+            </label>
+            <button class="btn primary" id="planBtn" data-i18n="plan.run">计算方案</button>
+          </div>
+          <div id="planSummary" class="plan-summary"></div>
+        </section>
+
+        <section class="card">
+          <h3 data-i18n="plan.ceiling">理论上限</h3>
+          <p class="sub" data-i18n="plan.ceilingSub">把已经打过的谱全部推上去，能到多少</p>
+          <div id="ceiling" class="ceiling"></div>
+          <div class="sep"></div>
+          <h3 data-i18n="plan.potential">曲库潜力</h3>
+          <p class="sub" data-i18n="plan.potentialSub">还没碰过的高定数谱，是涨分最直接的增量</p>
+          <div id="potential"></div>
+        </section>
+      </div>
+
+      <section class="card flush">
+        <div class="card-head pad">
+          <h3 data-i18n="plan.suggest">建议攻克的谱面</h3>
+          <span class="hint" id="planHint" data-i18n="plan.hintIdle">先在上面设一个目标</span>
+        </div>
+        <div class="table-wrap"><table id="planTable"></table></div>
+      </section>
+    </section>
+
+    <!-- ============ AI ============ -->
+    <section id="tab-ai" class="tab">
+      <div class="grid grid-ai">
+        <section class="card">
+          <h3 data-i18n="ai.title">生成分析</h3>
+          <p class="sub" data-i18n="ai.sub">把结构化数据交给 DeepSeek，输出诊断与训练计划</p>
+          <div class="field-label" data-i18n="ai.focus">关注点</div>
+          <div class="chips wrap" id="aiPresets">
+            <button class="chip on" data-p="all" data-i18n="ai.presetAll">全面诊断</button>
+            <button class="chip" data-p="week" data-i18n="ai.presetWeek">一周计划</button>
+            <button class="chip" data-p="hand" data-i18n="ai.presetHand">手法与设置</button>
+            <button class="chip" data-p="song" data-i18n="ai.presetSong">单曲攻克</button>
+            <button class="chip" data-p="push" data-i18n="ai.presetPush">只要推分顺序</button>
+          </div>
+          <div class="field-label" data-i18n="ai.notes">补充说明（选填）</div>
+          <textarea id="notes" rows="4" data-i18n-ph="ai.notesPh" placeholder="例：iPad 双指，中后段容易 early，慢速段常断连"></textarea>
+          <div class="fields">
+            <label class="field"><span data-i18n="ai.model">模型</span>
+              <select id="aiModel" class="select">
+                <option value="deepseek-chat" data-i18n="ai.modelChat">deepseek-chat · 快</option>
+                <option value="deepseek-reasoner" data-i18n="ai.modelReason">deepseek-reasoner · 更深</option>
+              </select>
+            </label>
+            <button class="btn primary" id="genBtn" data-i18n="ai.gen">生成分析</button>
+            <button class="btn" id="stopBtn" disabled data-i18n="ai.stop">停止</button>
+          </div>
+          <div class="fields">
+            <button class="btn ghost" id="localBtn" data-i18n="ai.offline">离线生成报告</button>
+            <button class="btn ghost" id="copyBtn" data-i18n="ai.copy">复制</button>
+            <button class="btn ghost" id="dlBtn" data-i18n="ai.download">下载 .md</button>
+          </div>
+          <p class="hint" id="aiState"></p>
+          <div class="sep"></div>
+          <p class="hint" data-i18n="ai.hint">调用 DeepSeek 官方接口，流式输出。Key 只存在你自己的浏览器里，除 DeepSeek 外不发往任何地方。没有 Key 也可以用「离线生成报告」，由本地规则引擎直接产出诊断。</p>
+        </section>
+
+        <section class="card chat-card">
+          <div id="out" class="out"><div class="empty" id="outEmpty" data-i18n="ai.empty">还没有分析结果。点「生成分析」让 AI 基于你的成绩给出诊断、推分顺序和训练安排，或者先用「离线生成报告」看本地结论。</div></div>
+          <div class="chatbar">
+            <input id="chatIn" type="text" data-i18n-ph="ai.chatPh" placeholder="追问，例如：慢流速怎么练？" autocomplete="off">
+            <button class="btn" id="sendBtn" data-i18n="ai.send">发送</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ============ 数据 ============ -->
+    <section id="tab-data" class="tab">
+      <div class="grid grid-3">
+        <section class="card">
+          <h3 data-i18n="data.cloud">云存档</h3>
+          <p class="sub" data-i18n="data.cloudSub">本地解析，不需要任何 QQ 机器人</p>
+          <div class="steps">
+            <div><b>1</b><span data-i18n="data.step1">点「扫码登录」，手机 TapTap 扫码</span></div>
+            <div><b>2</b><span data-i18n="data.step2">授权后自动填入 token 并拉取</span></div>
+            <div><b>3</b><span data-i18n="data.step3">已有 token 也可以直接粘进来</span></div>
+          </div>
+          <input id="token" type="text" data-i18n-ph="data.tokenPh" placeholder="sessionToken（25 位）" autocomplete="off">
+          <div class="fields">
+            <button class="btn primary" id="loginBtn" data-i18n="data.login">扫码登录</button>
+            <button class="btn" id="bindBtn" data-i18n="data.bind">验证账号</button>
+            <button class="btn" id="pullBtn" data-i18n="data.pull">拉取成绩</button>
+          </div>
+          <div class="msg" id="bindMsg"></div>
+          <div id="loginBox" class="login-box" hidden>
+            <div class="ltag" data-i18n="data.loginTip">在 TapTap 里输入这个字符码，或点下面的链接扫码</div>
+            <div class="login-code" id="loginCode"></div>
+            <a id="loginLink" href="#" target="_blank" rel="noreferrer"></a>
+            <div class="msg" id="loginStatus"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 data-i18n="data.file">存档文件</h3>
+          <p class="sub" data-i18n="data.fileSub">直接拖游戏存档（.save / zip）进来，不上传</p>
+          <div class="drop" id="drop">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+            <b data-i18n="data.dropTitle">拖放 .save 到这里</b>
+            <span data-i18n="data.dropSub">或点击选择文件</span>
+            <input id="fileIn" type="file" accept=".save,.zip" hidden>
+          </div>
+          <div class="msg" id="fileMsg"></div>
+          <div class="sep"></div>
+          <div class="box">
+            <b data-i18n="data.localTitle">解析在本地完成</b><br>
+            <span data-i18n="data.localBody">解 zip → AES-256 解密 → 按二进制格式读成绩，全程不写盘、不上传。</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 data-i18n="data.manual">手动导入</h3>
+          <p class="sub" data-i18n="data.manualSub">JSON，或每行一条文本</p>
+          <textarea id="paste" rows="8" data-i18n-ph="data.pastePh" placeholder="曲名 | 难度 | 定数 | acc | 分数(可选)"></textarea>
+          <div class="fields">
+            <button class="btn primary" id="importBtn" data-i18n="data.import">解析导入</button>
+            <button class="btn" id="demoBtn" data-i18n="data.demo">示例数据</button>
+            <button class="btn gh" id="clearBtn" data-i18n="data.clear">清空</button>
+          </div>
+          <div class="msg" id="importMsg"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h3 data-i18n="data.snapshot">快照</h3>
+          <div class="tools">
+            <button class="btn tiny" id="snapBtn" data-i18n="data.snapNow">记录当前快照</button>
+            <button class="btn tiny gh" id="exportBtn" data-i18n="data.export">导出 JSON</button>
+          </div>
+        </div>
+        <p class="sub" data-i18n="data.snapshotSub">每次拉取会自动留一个快照，用来观察 RKS 的实际变化</p>
+        <div id="snapList" class="snap-list"></div>
+      </section>
+
+      <section class="card flush">
+        <div class="card-head pad">
+          <h3 data-i18n="data.records">全部记录</h3>
+          <div class="tools">
+            <div class="search"><input id="dataSearch" type="text" data-i18n-ph="data.search" placeholder="搜索曲名 / 作曲…" autocomplete="off"></div>
+            <span class="hint" id="dataMeta"></span>
+          </div>
+        </div>
+        <div class="table-wrap tall"><table id="dataTable"></table></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Phigros Lab · <span data-i18n="footer.local">本地运行，数据不上传</span></span>
+    <span class="dim" data-i18n="footer.formula">单曲 RKS = 定数 × ((acc − 55) / 45)²　玩家 RKS = (最佳 27 + 最近 3) / 30</span>
+  </footer>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="modal" id="keyModal" hidden>
+  <div class="modal-card">
+    <div class="card-head">
+      <h3 data-i18n="key.title">DeepSeek API Key</h3>
+      <button class="icon-btn" id="modalClose" aria-label="关闭" data-i18n-title="ui.close">✕</button>
+    </div>
+    <p class="hint" data-i18n="key.desc">只保存在本机 localStorage，请求直接发往 api.deepseek.com。没有 Key 也能用本地分析。</p>
+    <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+    <div class="fields">
+      <button class="btn primary" id="saveKeyBtn" data-i18n="key.save">保存</button>
+      <button class="btn gh" id="clearKeyBtn" data-i18n="key.clear">清除</button>
+      <span class="msg" id="keyState"></span>
+    </div>
+  </div>
+</div>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/core.js"></script>
+<script src="assets/charts.js"></script>
+<script src="assets/ui.js"></script>
+</body>
+</html>
