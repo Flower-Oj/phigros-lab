@@ -41,6 +41,9 @@
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="15" r="3.6"/><path d="M10.8 12.2 20 3m-3 3 2.5 2.5M14.5 8.5 17 11"/></svg>
       <i class="key-dot" id="keyDot"></i>
     </button>
+    <button class="icon-btn" id="setBtn" data-i18n-title="set.title" title="设置">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.1"/><path d="M12 3.2v2.2M12 18.6v2.2M4.8 12H2.6M21.4 12h-2.2M6.9 6.9 5.3 5.3M18.7 18.7l-1.6-1.6M6.9 17.1l-1.6 1.6M18.7 5.3l-1.6 1.6"/></svg>
+    </button>
   </header>
 
   <nav class="tabs" id="tabs">
@@ -351,6 +354,93 @@
       <button class="btn primary" id="saveKeyBtn" data-i18n="key.save">保存</button>
       <button class="btn gh" id="clearKeyBtn" data-i18n="key.clear">清除</button>
       <span class="msg" id="keyState"></span>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="chartModal" hidden>
+  <div class="modal-card wide" id="chartCard"></div>
+</div>
+
+<div class="modal" id="setModal" hidden>
+  <div class="modal-card wide">
+    <div class="card-head">
+      <h3 data-i18n="set.title">设置</h3>
+      <button class="icon-btn" id="setClose" aria-label="关闭" data-i18n-title="ui.close">✕</button>
+    </div>
+
+    <div class="set-sec">
+      <div class="set-h" data-i18n="set.appearance">外观</div>
+      <div class="set-row">
+        <span data-i18n="set.theme">主题</span>
+        <div class="chips" id="setTheme">
+          <button class="chip" data-theme="dark" data-i18n="set.themeDark">深色</button>
+          <button class="chip" data-theme="light" data-i18n="set.themeLight">浅色</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <span data-i18n="set.lang">语言</span>
+        <div class="chips" id="setLang">
+          <button class="chip" data-lang="zh">中文</button>
+          <button class="chip" data-lang="en">English</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-sec">
+      <div class="set-h">AI</div>
+      <div class="set-row">
+        <span data-i18n="set.keyLabel">API Key</span>
+        <b class="mono" id="setKeyState"></b>
+      </div>
+      <div class="set-actions">
+        <button class="btn tiny" id="setKeyBtn" data-i18n="set.keyOpen">管理 API Key</button>
+        <button class="btn ghost tiny" id="setTourBtn" data-i18n="set.tour">重看新手教程</button>
+      </div>
+    </div>
+
+    <div class="set-sec">
+      <div class="set-h" data-i18n="set.data">数据</div>
+      <div class="set-actions">
+        <button class="btn tiny" id="setExport" data-i18n="set.export">导出 JSON</button>
+        <button class="btn gh tiny" id="setClear" data-i18n="set.clear">清空本地数据</button>
+      </div>
+      <p class="hint" data-i18n="set.dataHint">成绩、快照和 API Key 都存在这台设备的浏览器里，清空后不可恢复。</p>
+    </div>
+
+    <div class="set-sec">
+      <div class="set-h" data-i18n="set.about">关于</div>
+      <div class="set-row"><span data-i18n="set.version">版本</span><b class="mono" id="setVer">—</b></div>
+
+      <details class="set-doc" open>
+        <summary data-i18n="set.legal">著作权声明</summary>
+        <p data-i18n-html="set.legalBody">Phigros Lab 是**非官方**粉丝工具，与 Pigeon Games 无任何关联。《Phigros》游戏、曲目、曲绘、谱面及相关素材的版权归 Pigeon Games 及各曲师、曲绘师、谱师所有。本工具不内置、不分发任何游戏资源（音频、曲绘、谱面文件），只解析你自己账号的成绩数据。</p>
+      </details>
+      <details class="set-doc">
+        <summary data-i18n="set.credits">数据来源</summary>
+        <p data-i18n-html="set.creditsBody">曲库与定数来自社区整理的曲目表；BPM / 时长 / 物量来自 <a href="https://github.com/sakimidare/Phigros" target="_blank" rel="noreferrer">sakimidare/Phigros</a>（数据抓取自萌娘百科，遵循 CC BY-NC-SA 3.0），只取这四项事实数据。成绩来自你自己的 TapTap 云存档。</p>
+      </details>
+      <details class="set-doc">
+        <summary data-i18n="set.privacy">隐私</summary>
+        <p data-i18n-html="set.privacyBody">成绩只在本机浏览器解析，不上传。不填 API Key 时，AI 请求经本站后端转发（服务端持有免费额度，按 IP 与浏览器匿名 id 每天 3 次）；填了自己的 Key 则直连 api.deepseek.com。除此之外没有统计埋点，也不收集任何数据。</p>
+      </details>
+      <details class="set-doc">
+        <summary data-i18n="set.license">开源许可</summary>
+        <p data-i18n-html="set.licenseBody">本站代码以 MIT 许可开源：<a href="https://github.com/Flower-Oj/phigros-lab" target="_blank" rel="noreferrer">Flower-Oj/phigros-lab</a>。第三方数据按各自许可使用，详见仓库 LICENSE 与 NOTICE。</p>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div class="tour" id="tour" hidden>
+  <div class="tour-card">
+    <div class="tour-dots" id="tourDots"></div>
+    <div class="tour-body" id="tourBody"></div>
+    <div class="tour-foot">
+      <button class="btn ghost tiny" id="tourSkip" data-i18n="tour.skip">跳过</button>
+      <div class="spacer"></div>
+      <button class="btn tiny" id="tourPrev" data-i18n="tour.prev">上一步</button>
+      <button class="btn primary tiny" id="tourNext" data-i18n="tour.next">下一步</button>
     </div>
   </div>
 </div>

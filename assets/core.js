@@ -109,7 +109,7 @@ const S = {
 const K = {
   key: 'pglab_key', notes: 'pglab_notes', data: 'pglab_data', meta: 'pglab_meta',
   snap: 'pglab_snap', model: 'pglab_model', preset: 'pglab_preset', theme: 'pglab_theme',
-  cid: 'pglab_cid'
+  cid: 'pglab_cid', tour: 'pglab_tour'
 };
 
 /**
@@ -298,6 +298,9 @@ function ceiling(level) {
   return sum(boosted) / Math.max(1, boosted.length);
 }
 
+/* ---------------- 版本 ---------------- */
+const VERSION = '2.2.0';
+
 /* ---------------- 曲库 ---------------- */
 const VARIANTS = { '红': '紅', '万': '萬', '龙': '龍', '灵': '靈', '梦': '夢', '乐': '樂', '华': '華', '会': '會', '战': '戰', '亚': '亞', '与': '與' };
 function norm(s) {
@@ -325,6 +328,11 @@ async function loadLibrary() {
         id,
         song: (c[idx.song] || '').trim(),
         composer: (c[idx.composer] || '').trim(),
+        illustrator: (c[idx.illustrator] || '').trim(),
+        charter: {
+          EZ: (c[idx.EZC] || '').trim(), HD: (c[idx.HDC] || '').trim(),
+          IN: (c[idx.INC] || '').trim(), AT: (c[idx.ATC] || '').trim()
+        },
         const: {}
       };
       RANKS.forEach(rk => {
@@ -336,11 +344,48 @@ async function loadLibrary() {
     S.library = list;
     S.libById = new Map(list.map(e => [e.id, e]));
     S.libByName = new Map(list.map(e => [norm(e.song), e]));
+    await loadChartStats();
     return list;
   } catch (e) {
     S.library = [];
     return [];
   }
+}
+
+/**
+ * 谱面统计（BPM / 时长 / 物量 / 章节）：data/charts.csv 由 tools/build_charts.py 生成。
+ * 拿不到就静默跳过——谱面预览只显示存档里已有的定数与你的成绩，不能让曲库整体挂掉。
+ */
+async function loadChartStats() {
+  try {
+    const res = await fetch('data/charts.csv');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+    const head = lines[0].split(',').map(h => h.trim());
+    const idx = {};
+    head.forEach((h, i) => (idx[h] = i));
+    for (let i = 1; i < lines.length; i++) {
+      // 章节名里可能有逗号，只按前 4 列切，后面的定数物量一定是数字
+      const c = lines[i].split(',');
+      const id = (c[idx.id] || '').trim();
+      const e = S.libById.get(id);
+      if (!e) continue;
+      const combo = {};
+      RANKS.forEach(rk => {
+        const v = parseInt(c[idx[rk]], 10);
+        if (isNum(v) && v > 0) combo[rk] = v;
+      });
+      e.stats = {
+        bpm: (c[idx.bpm] || '').trim(),
+        len: parseInt(c[idx.len], 10) || 0,
+        chapter: head.indexOf('chapter') > -1
+          ? c.slice(idx.chapter, c.length - 4).join(',').replace(/^"|"$/g, '').trim()
+          : '',
+        combo
+      };
+    }
+  } catch (err) {}
 }
 
 /** 曲库覆盖与未游玩的高定数谱 */
@@ -380,6 +425,31 @@ function composerOf(r) {
   const id = resolveId(r);
   const e = id && S.libById.get(id);
   return e ? e.composer : '';
+}
+
+/**
+ * 谱面预览用的合并数据：曲库条目（定数 / 曲绘师 / 谱师 / 物量）+ 你在这首歌上的成绩。
+ * 只认存档里真有的难度，没打过的难度不虚构数字。
+ */
+function chartOf(nameOrId, wantDiff) {
+  const A = analysis();
+  const id = (S.libById && (S.libById.has(nameOrId) ? nameOrId : null)) ||
+    (S.libByName && (S.libByName.get(norm(nameOrId)) || {}).id) || null;
+  const lib = (id && S.libById.get(id)) || null;
+
+  const mine = {};
+  for (const r of A.list) {
+    const same = id ? resolveId(r) === id : norm(r.n) === norm(nameOrId);
+    if (!same) continue;
+    const cur = mine[r.d];
+    if (!cur || r.rk > cur.rk) mine[r.d] = r; // 同名同难度留最好的一次
+  }
+
+  const diffs = RANKS.filter(rk => (lib && isNum(lib.const[rk])) || mine[rk]);
+  let diff = wantDiff && diffs.includes(wantDiff) ? wantDiff
+    : diffs.find(rk => mine[rk]) || diffs[diffs.length - 1] || null;
+
+  return { id, lib, song: lib ? lib.song : String(nameOrId), mine, diffs, diff };
 }
 
 /* ---------------- 诊断 ---------------- */
@@ -832,8 +902,8 @@ Object.assign(PL, {
   $, $$, esc, clamp, sum, mean, isNum, r2, r3, r4, signed, timeAgo, dateStr,
   RANKS, rksOf, accFor, norm, DEMO, S, K,
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
-  loadLibrary, coverage, resolveId, composerOf, diagItems,
+  loadLibrary, coverage, resolveId, composerOf, chartOf, diagItems,
   importText, parseLines, exportJSON, pushSnapshot,
-  buildPrompt, offlineReport, PRESETS, clientId
+  buildPrompt, offlineReport, PRESETS, clientId, VERSION
 });
 })();

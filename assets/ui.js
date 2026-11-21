@@ -8,10 +8,11 @@ const PL = window.PL;
 const t = (k, v) => (PL.t ? PL.t(k, v) : k);
 
 const {
-  $, $$, esc, r2, r3, r4, signed, timeAgo, dateStr, S, K,
+  $, $$, esc, r2, r3, r4, signed, timeAgo, dateStr, S, K, isNum,
   analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, composerOf, diagItems, saveLS, loadLS,
-  importText, exportJSON, pushSnapshot, buildPrompt, offlineReport, PRESETS, clientId
+  importText, exportJSON, pushSnapshot, buildPrompt, offlineReport, PRESETS, clientId,
+  chartOf
 } = PL;
 
 /* ---------------- 全局界面状态 ---------------- */
@@ -20,6 +21,7 @@ const ui = {
   push: { target: 99.5, diff: 'all', q: '', includeOut: false, sort: 'gain', limit: 40 },
   dataQ: '',
   aborter: null,
+  tour: 0,
   streaming: false
 };
 
@@ -232,7 +234,7 @@ function renderPush() {
   }
 
   const body = shown.map((r, i) => `
-    <tr>
+    <tr class="clk" data-song="${esc(r.n)}" data-diff="${r.d}" tabindex="0" title="${esc(t('cp.title'))}">
       <td class="idx">${String(i + 1).padStart(2, '0')}</td>
       <td class="song">
         <span class="nm">${esc(r.n)}<span class="${pillCls(r.d)}">${r.d} ${r2(r.c)}</span></span>
@@ -342,7 +344,7 @@ function runPlan() {
     </div>`;
 
   const rows = p.picks.map((r, i) => `
-    <tr>
+    <tr class="clk" data-song="${esc(r.n)}" data-diff="${r.d}" tabindex="0" title="${esc(t('cp.title'))}">
       <td class="idx">${String(i + 1).padStart(2, '0')}</td>
       <td class="song"><span class="nm">${esc(r.n)}<span class="${pillCls(r.d)}">${r.d} ${r2(r.c)}</span></span>
         <span class="by">${esc(composerOf(r))}</span></td>
@@ -373,7 +375,7 @@ function renderDataTable() {
       <th class="n" style="width:44px">#</th><th>${esc(t('th.song'))}</th><th class="n">${esc(t('th.diff'))}</th>
       <th class="n">${esc(t('th.score'))}</th><th class="n">${esc(t('th.acc'))}</th><th class="n">${esc(t('th.rks'))}</th><th>${esc(t('th.grade'))}</th>
     </tr></thead><tbody>${shown.map((r, i) => `
-      <tr>
+      <tr class="clk" data-song="${esc(r.n)}" data-diff="${r.d}" tabindex="0" title="${esc(t('cp.title'))}">
         <td class="idx n">${i + 1}</td>
         <td class="song"><span class="nm">${esc(r.n)}</span>${composerOf(r) ? `<span class="by">${esc(composerOf(r))}</span>` : ''}</td>
         <td class="n">${r.d} ${r2(r.c)}</td>
@@ -413,6 +415,207 @@ function renderSnapshots() {
       <span class="meta">${esc(t('snap.meta', { a: r2(s.acc), p: s.phi, n: s.n }))}</span>
     </div>`;
   }).join('');
+}
+
+/* ---------------- 谱面预览 ---------------- */
+function mmss(sec) {
+  const m = Math.floor(sec / 60);
+  return m + ':' + String(Math.round(sec % 60)).padStart(2, '0');
+}
+
+function gradeOf(r) {
+  if (!r) return '—';
+  if (r.a >= 99.995) return 'Phi';
+  if (r.fc) return 'FC';
+  if (r.s >= 960000) return 'V';
+  if (r.s >= 920000) return 'S';
+  if (r.s >= 880000) return 'A';
+  return r.s ? 'B' : '—';
+}
+
+/** 这张谱的物量在同定数（±0.3）谱面里的百分位；样本太少就不给 */
+function comboPct(rk, constVal, notes) {
+  const lib = S.library || [];
+  if (!notes || !lib.length || !isNum(constVal)) return null;
+  const peers = lib.filter(e => e.stats && e.stats.combo[rk] && isNum(e.const[rk]) &&
+    Math.abs(e.const[rk] - constVal) <= 0.3);
+  if (peers.length < 8) return null;
+  const below = peers.filter(e => e.stats.combo[rk] <= notes).length;
+  return Math.round(below / peers.length * 100);
+}
+
+/** 数据源用 {…} 标谱师组，展示时去掉外层大括号 */
+function plainCharter(s) {
+  const v = String(s || '').trim();
+  const m = v.match(/^\{(.*)\}$/);
+  return m ? m[1] : (v || '—');
+}
+
+function chartHTML(c) {
+  const lib = c.lib;
+  const st = (lib && lib.stats) || null;
+  const cur = c.diff;
+  const curMine = cur ? c.mine[cur] : null;
+  const A = analysis();
+  // 定数优先用曲库里的官方值，取不到才退回你自己那条记录里的定数
+  const curConst = (lib && isNum(lib.const[cur])) ? lib.const[cur] : (curMine ? curMine.c : null);
+
+  const sub = [];
+  if (st && st.chapter) sub.push(esc(st.chapter));
+  if (lib && lib.composer) sub.push(esc(lib.composer));
+  if (lib && lib.illustrator) sub.push(esc(t('cp.illu')) + ' ' + esc(lib.illustrator));
+
+  const diffs = c.diffs.length ? c.diffs : [];
+  const diffBtns = diffs.map(rk => {
+    const cn = lib && lib.const[rk];
+    const has = !!c.mine[rk];
+    const n = st && st.combo[rk];
+    return `<button class="cp-diff${has ? ' hit' : ''}${rk === cur ? ' on' : ''}" data-cdiff="${rk}">
+      <b>${rk}</b>
+      <strong>${isNum(cn) ? r2(cn) : '—'}</strong>
+      <em>${n ? n + ' ' + esc(t('cp.notes')) : '—'}</em>
+    </button>`;
+  }).join('');
+
+  const notes = st && cur ? st.combo[cur] : null;
+  const density = notes && st.len ? notes / st.len : null;
+
+  const facts = [
+    [t('cp.const'), isNum(curConst) ? r2(curConst) : '—', false],
+    [t('cp.notes'), notes ? String(notes) : '—', false],
+    ['BPM', st && st.bpm ? st.bpm : '—', false],
+    [t('cp.length'), st && st.len ? mmss(st.len) : '—', false],
+    [t('cp.density'), density ? t('cp.densityV', { v: density.toFixed(2) }) : '—', false],
+    [t('cp.charter'), plainCharter((lib && lib.charter && lib.charter[cur]) || ''), true]
+  ];
+
+  const maxCombo = Math.max(1, ...diffs.map(rk => (st && st.combo[rk]) || 0));
+  const bars = diffs.map(rk => {
+    const n = (st && st.combo[rk]) || 0;
+    const d = n && st.len ? n / st.len : null;
+    return `<div class="cp-bar-row${rk === cur ? ' on' : ''}">
+      <span class="lb">${rk}</span>
+      <span class="cp-bar-track"><i style="width:${Math.max(3, n / maxCombo * 100)}%"></i></span>
+      <span class="vv">${n ? n : '—'}${d ? ' <s>· ' + d.toFixed(1) + '/s</s>' : ''}</span>
+    </div>`;
+  }).join('');
+
+  const pct = cur ? comboPct(cur, curConst, notes) : null;
+  const best = curMine
+    ? `<div class="cp-best">
+        <span class="big">${r2(curMine.a)}%</span>
+        <span class="m">${curMine.s ? curMine.s.toLocaleString('en-US') : '—'}</span>
+        <span class="badge ${curMine.a >= 99.995 ? 'mint' : curMine.fc ? 'accent' : ''}">${gradeOf(curMine)}</span>
+        <span class="m">RKS ${r2(curMine.rk)}</span>
+        ${curMine.rk >= (A.cutoff || 0) ? '<span class="m" style="color:var(--mint)">B30</span>' : ''}
+        <span class="m" style="color:var(--text-3)">${esc(t('cp.best'))}</span>
+      </div>`
+    : `<div class="cp-best"><span class="none">${esc(t('cp.notPlayed'))} · ${esc(t('cp.notPlayedHint'))}</span></div>`;
+
+  return `
+    <div class="card-head">
+      <div class="cp-title">
+        <h3>${esc(c.song)}</h3>
+        <div class="cp-sub">${sub.map(x => `<span>${x}</span>`).join('<i></i>')}</div>
+      </div>
+      <button class="icon-btn" id="chartClose" aria-label="${esc(t('cp.close'))}">✕</button>
+    </div>
+
+    ${diffs.length ? `<div class="cp-diffs">${diffBtns}</div>` : ''}
+
+    ${st && notes ? `
+      <div class="cp-facts">${facts.map(([k, v, sm]) =>
+        `<div class="cp-fact"><span>${esc(k)}</span><b class="${sm ? 'sm' : ''}">${esc(v)}</b></div>`).join('')}</div>
+      <div class="cp-bars">${bars}</div>
+      ${pct != null ? `<p class="hint" style="margin:-6px 0 10px">${esc(t('cp.percentile', { p: pct }))}</p>` : ''}
+    ` : `
+      <div class="cp-facts">${facts.slice(0, 1).concat(facts.slice(5)).map(([k, v, sm]) =>
+        `<div class="cp-fact"><span>${esc(k)}</span><b class="${sm ? 'sm' : ''}">${esc(v)}</b></div>`).join('')}</div>
+      <p class="hint" style="margin:2px 0 12px"><b>${esc(t('cp.noStats'))}</b> — ${esc(t('cp.noStatsHint'))}</p>
+    `}
+
+    ${best}
+    <p class="cp-foot">${esc(t('cp.dataNote'))}</p>`;
+}
+
+function openChart(name, diff) {
+  const c = chartOf(name, diff);
+  if (!c.lib && !c.diffs.length) return toast(t('toast.unknownSong'), 'err');
+  const card = $('#chartCard');
+  card.dataset.song = c.lib ? c.song : name;
+  card.innerHTML = chartHTML(c);
+  $('#chartModal').hidden = false;
+  const close = $('#chartClose');
+  if (close) close.addEventListener('click', closeChart);
+}
+
+function closeChart() { $('#chartModal').hidden = true; }
+
+/* ---------------- 设置 ---------------- */
+function syncSet() {
+  const k = $('#setKeyState');
+  if (k) k.textContent = S.key ? t('set.keyOwn') : t('set.keyFree');
+  $$('#setTheme .chip').forEach(b => b.classList.toggle('on', b.dataset.theme === ui.theme));
+  if (PL.getLang) $$('#setLang .chip').forEach(b => b.classList.toggle('on', b.dataset.lang === PL.getLang()));
+  const v = $('#setVer');
+  if (v) v.textContent = PL.VERSION || '2.2.0';
+}
+
+function openSet() {
+  syncSet();
+  $('#setModal').hidden = false;
+  if (PL.applyStatic) PL.applyStatic($('#setModal'));
+}
+function closeSet() { $('#setModal').hidden = true; }
+
+/** 设置里的「清空本地数据」：成绩、快照、备注、API Key 一起清掉 */
+function clearAll() {
+  S.data = []; S.official = null; S.nick = ''; S.sum3 = null;
+  S.source = ''; S.updatedAt = 0; S.snapshots = []; S.notes = ''; S.key = '';
+  try {
+    [K.key, K.notes, K.data, K.meta, K.snap].forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+  const notes = $('#notes');
+  if (notes) notes.value = '';
+  const apiKey = $('#apiKey');
+  if (apiKey) apiKey.value = '';
+  syncKeyDot();
+  renderAll();
+}
+
+/* ---------------- 新手教程 ---------------- */
+const TOUR = [
+  { t: 'tour.s1t', b: 'tour.s1b', tip: 'tour.s1tip', go: 'data', goLabel: 'tour.go' },
+  { t: 'tour.s2t', b: 'tour.s2b', tip: 'tour.s2tip', go: 'overview' },
+  { t: 'tour.s3t', b: 'tour.s3b', tip: 'tour.s3tip', go: 'push' },
+  { t: 'tour.s4t', b: 'tour.s4b', tip: 'tour.s4tip', go: 'ai' },
+  { t: 'tour.s5t', b: 'tour.s5b', tip: 'tour.s5tip' }
+];
+
+function renderTour(i) {
+  const step = TOUR[i];
+  const last = i === TOUR.length - 1;
+  $('#tourDots').innerHTML = TOUR.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('');
+  $('#tourBody').innerHTML = `
+    <div class="tour-kicker">${esc(t('tour.kicker', { n: i + 1, t: TOUR.length }))}</div>
+    <h3>${esc(t(step.t))}</h3>
+    <p>${t(step.b)}</p>
+    <div class="tour-tip">${t(step.tip)}</div>
+    ${step.go && step.goLabel ? `<div class="tour-go"><button class="btn tiny ghost" data-tour-go="${step.go}">${esc(t(step.goLabel))}</button></div>` : ''}`;
+  $('#tourPrev').disabled = i === 0;
+  $('#tourNext').textContent = last ? t('tour.done') : t('tour.next');
+  ui.tour = i;
+}
+
+function openTour() {
+  ui.tour = 0;
+  renderTour(0);
+  $('#tour').hidden = false;
+}
+
+function closeTour() {
+  $('#tour').hidden = true;
+  try { localStorage.setItem(K.tour, '1'); } catch (e) {}
 }
 
 /* ---------------- AI ---------------- */
@@ -909,6 +1112,77 @@ function bindEvents() {
   $('#keyBtn').addEventListener('click', openKeyModal);
   $('#modalClose').addEventListener('click', closeKeyModal);
   $('#keyModal').addEventListener('click', e => { if (e.target.id === 'keyModal') closeKeyModal(); });
+
+  // 设置
+  $('#setBtn').addEventListener('click', openSet);
+  $('#setClose').addEventListener('click', closeSet);
+  $('#setModal').addEventListener('click', e => { if (e.target.id === 'setModal') closeSet(); });
+  $('#setTheme').addEventListener('click', e => {
+    const b = e.target.closest('[data-theme]');
+    if (!b) return;
+    applyTheme(b.dataset.theme);
+    syncSet();
+  });
+  $('#setLang').addEventListener('click', e => {
+    const b = e.target.closest('[data-lang]');
+    if (!b || b.dataset.lang === (PL.getLang ? PL.getLang() : 'zh')) return;
+    toggleLang();
+    syncSet();
+  });
+  $('#setKeyBtn').addEventListener('click', () => { closeSet(); openKeyModal(); });
+  $('#setExport').addEventListener('click', () => $('#exportBtn').click());
+  $('#setClear').addEventListener('click', () => {
+    if (!confirm(t('set.clearAsk'))) return;
+    clearAll();
+    closeSet();
+    toast(t('set.clearDone'));
+  });
+  $('#setTourBtn').addEventListener('click', () => { closeSet(); openTour(); });
+
+  // 谱面预览
+  $('#chartModal').addEventListener('click', e => { if (e.target.id === 'chartModal') closeChart(); });
+  $('#chartCard').addEventListener('click', e => {
+    const b = e.target.closest('[data-cdiff]');
+    if (!b) return;
+    const card = $('#chartCard');
+    openChart(card.dataset.song, b.dataset.cdiff);
+  });
+  ['#pushTable', '#dataTable', '#planTable'].forEach(sel => {
+    const tb = $(sel);
+    if (!tb) return;
+    tb.addEventListener('click', e => {
+      const tr = e.target.closest('tr.clk');
+      if (!tr) return;
+      openChart(tr.dataset.song, tr.dataset.diff);
+    });
+    tb.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const tr = e.target.closest('tr.clk');
+      if (!tr) return;
+      e.preventDefault();
+      openChart(tr.dataset.song, tr.dataset.diff);
+    });
+  });
+
+  // 新手教程
+  $('#tourNext').addEventListener('click', () => {
+    if (ui.tour >= TOUR.length - 1) return closeTour();
+    renderTour(ui.tour + 1);
+  });
+  $('#tourPrev').addEventListener('click', () => { if (ui.tour > 0) renderTour(ui.tour - 1); });
+  $('#tourSkip').addEventListener('click', closeTour);
+  $('#tourBody').addEventListener('click', e => {
+    const b = e.target.closest('[data-tour-go]');
+    if (!b) return;
+    closeTour();
+    switchTab(b.dataset.tourGo);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('#chartModal').hidden) return closeChart();
+    if (!$('#setModal').hidden) return closeSet();
+    if (!$('#tour').hidden) return closeTour();
+  });
   $('#saveKeyBtn').addEventListener('click', () => {
     S.key = $('#apiKey').value.trim();
     localStorage.setItem(K.key, S.key);
@@ -1111,7 +1385,9 @@ function bindEvents() {
 
   // 键盘
   document.addEventListener('keydown', e => {
-    if (e.target.matches('input,textarea,select')) {
+    // e.target 可能是 document 本身（脚本派发的事件），没有 matches，别直接调
+    const tag = e.target && e.target.matches ? e.target : null;
+    if (tag && tag.matches('input,textarea,select')) {
       if (e.key === 'Escape') e.target.blur();
       return;
     }
@@ -1141,6 +1417,11 @@ function init() {
 
   const h = location.hash.slice(1);
   if (TABS.includes(h)) switchTab(h);
+
+  // 首次进入走一遍教程。看过一次就记下来，之后不再打扰（设置里可以重看）
+  let seen = '1';
+  try { seen = localStorage.getItem(K.tour) || ''; } catch (e) {}
+  if (!seen) setTimeout(openTour, 400);
 
   // 曲库异步加载后刷新依赖它的部分
   loadLibrary().then(() => {
