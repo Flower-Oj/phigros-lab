@@ -6,6 +6,19 @@
 可以分析你的成绩，给出下一步建议。
 ---
 
+## 在线用 / 装安卓版
+
+不想装 Node 的话，直接打开在线版，后端也跑在云上，云存档拉取、上传 `.save` 解析、AI 教练都能用：
+
+**https://phigros-lab.app.workbuddy.host/?sharecode=MKTEW4KJWC**
+
+安卓安装包见 **Releases** 页面的 `phigros-lab-2.1.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套后端，装完即可离线解析存档。
+
+> 在线版是公开实例：`proxy.js` 会把你的 sessionToken 转发给 LeanCloud、把 API Key 转发给 DeepSeek。
+> 转发过程不落盘、不打日志（只透传 `Authorization`），但对凭证特别敏感的话，建议本地跑一份。
+
+---
+
 ## 快速开始
 
 ```bash

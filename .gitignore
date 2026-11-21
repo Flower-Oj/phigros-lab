@@ -22,3 +22,6 @@ desktop.ini
 # 编辑器
 .vscode/
 .idea/
+
+# 部署时附带的可下载安装包（构建产物，不进 git）
+download/
