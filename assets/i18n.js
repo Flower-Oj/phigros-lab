@@ -386,6 +386,8 @@ const D = {
   'poster.b27': ['B27 均', 'B27 avg'],
   'poster.b3': ['B3 均', 'B3 avg'],
   'poster.accShort': ['达成率', 'ACC'],
+  'poster.art': ['曲绘 {d}/{n}', 'Jacket {d}/{n}'],
+  'poster.withArt': ['含 {n} 张曲绘', '{n} jackets'],
   'poster.madeBy': ['由 Phigros Lab 生成', 'Made with Phigros Lab'],
   'poster.exporting': ['生成中…', 'Rendering…'],
   'poster.done': ['B30 图片已保存', 'B30 image saved'],

@@ -51,17 +51,6 @@ function pal() {
 }
 
 const DIFF_COLOR = { AT: 'rose', HD: 'amber', EZ: 'mint', IN: 'accent2' };
-const DIFF_SOFT = { AT: 'roseSoft', HD: 'amberSoft', EZ: 'mintSoft', IN: 'accentSoft' };
-
-function soft(p) {
-  /* 把基础色转成同色系的低透明度版本，用在难度标签底色上 */
-  const out = {};
-  out.roseSoft = hexA(p.rose, .14);
-  out.amberSoft = hexA(p.amber, .14);
-  out.mintSoft = hexA(p.mint, .14);
-  out.accentSoft = hexA(p.accent, .14);
-  return out;
-}
 
 function hexA(hex, a) {
   const h = String(hex).trim();
@@ -69,6 +58,16 @@ function hexA(hex, a) {
   if (!m) return h;
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/* 深色底还是浅色字，按底色亮度自动选，别让难度标签在曲绘上看不清 */
+function contrastOn(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const L = 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+  return L > 0.42 ? '#0b0d12' : '#ffffff';
 }
 
 /* ---------- 拼版 ---------- */
@@ -79,7 +78,8 @@ const RIGHT = W - PAD;
 const COLS = 5;
 const GAP = 10;
 const CARD_W = (RIGHT - PAD - GAP * (COLS - 1)) / COLS;
-const CARD_H = 112;
+const CARD_H = 158;
+const COVER_H = 90;          /* 曲绘区高度，没有曲绘时这块就是难度色块 */
 const HEAD_H = 174;
 
 /** 按宽度折行，超过行数就把最后一行截断加省略号 */
@@ -110,21 +110,16 @@ function wrap(text, maxW, size, maxLines, opts) {
   return out.length ? out : [''];
 }
 
-function buildSVG() {
+function buildSVG(jackets) {
   const A = analysis();
   const rows = A.sorted.slice(0, 30);
   if (!rows.length) throw new Error(t('toast.needData'));
+  const arts = jackets || new Map();
 
   const p = pal();
-  const s = soft(p);
   /* 浅色主题下 7~8px 的小字用 text-3 太淡，改吃 text-2 */
   const dark = document.documentElement.dataset.theme !== 'light';
   const small = dark ? p.text3 : p.text2;
-
-  const rkAll = rows.map(r => r.rk);
-  const maxRk = Math.max(...rkAll);
-  const minRk = Math.min(...rkAll);
-  const span = Math.max(0.0001, maxRk - minRk);
 
   const gridRows = Math.ceil(rows.length / COLS);
   const gridH = gridRows * CARD_H + (gridRows - 1) * GAP;
@@ -145,6 +140,10 @@ function buildSVG() {
   L.push(`<radialGradient id="g2" gradientUnits="userSpaceOnUse" cx="${W - 40}" cy="${H}" r="${Math.min(600, Math.round(H * 0.55))}">
     <stop offset="0" stop-color="${p.mint}" stop-opacity="0.10"/>
     <stop offset="1" stop-color="${p.mint}" stop-opacity="0"/></radialGradient>`);
+  /* 曲绘下沿压暗，和正文区衔接 */
+  L.push(`<linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${p.panel2 || p.panel}" stop-opacity="0"/>
+    <stop offset="1" stop-color="${p.panel2 || p.panel}" stop-opacity="0.9"/></linearGradient>`);
   L.push('</defs>');
 
   /* --- 背景 --- */
@@ -200,74 +199,82 @@ function buildSVG() {
     const x = PAD + col * (CARD_W + GAP);
     const y = HEAD_H + row * (CARD_H + GAP);
     const top3 = i < 3;
-    const ratio = 0.06 + 0.94 * (r.rk - minRk) / span;
 
     const dcol = p[DIFF_COLOR[r.d] || 'accent2'];
-    const dsoft = s[DIFF_SOFT[r.d] || 'accentSoft'];
     /* 成绩段染色：金 → 橙 → 蓝 → 灰，卡片边框和底色跟着走 */
-    const tier = r.a >= 99.995 ? p.mint : r.a >= 99 ? p.amber : r.a >= 98 ? p.accent2 : small;
+    const tier = r.a >= 99.995 ? p.mint : r.a >= 99 ? p.amber : r.a >= 98 ? p.sky : small;
 
     const X = x.toFixed(2);
     const Wd = CARD_W.toFixed(2);
-    const TX = (x + 14).toFixed(2);          /* 文字左边线，让开左侧色条 */
-    const TR = (x + CARD_W - 12).toFixed(2); /* 文字右边线 */
+    const TX = (x + 12).toFixed(2);
+    const TR = (x + CARD_W - 12).toFixed(2);
+    const art = arts.get(artKey(r));
 
-    /* 卡底 + 成绩段淡染 + 左侧难度色条，统一裁进圆角 */
+    /* 卡底 + 成绩段淡染 + 曲绘，统一裁进圆角 */
     L.push(`<clipPath id="cw${i}"><rect x="${X}" y="${y}" width="${Wd}" height="${CARD_H}" rx="10"/></clipPath>`);
     L.push(`<g clip-path="url(#cw${i})">`);
     L.push(`<rect x="${X}" y="${y}" width="${Wd}" height="${CARD_H}" fill="${p.panel2 || p.panel}"/>`);
-    L.push(`<rect x="${X}" y="${y}" width="${Wd}" height="${CARD_H}" fill="${hexA(tier, dark ? .07 : .05)}"/>`);
-    L.push(`<rect x="${X}" y="${y}" width="4" height="${CARD_H}" fill="${dcol}"/>`);
+    L.push(`<rect x="${X}" y="${y}" width="${Wd}" height="${CARD_H}" fill="${hexA(tier, dark ? .07 : .03)}"/>`);
+    if (art) {
+      L.push(`<image x="${X}" y="${y}" width="${Wd}" height="${COVER_H}"
+        preserveAspectRatio="xMidYMid slice" href="${art}"/>`);
+      L.push(`<rect x="${X}" y="${y + COVER_H - 26}" width="${Wd}" height="26" fill="url(#fade)"/>`);
+    } else {
+      /* 没曲绘（下架曲 / 新曲 / 离线）就用难度色块顶上，版式保持一致 */
+      L.push(`<rect x="${X}" y="${y}" width="${Wd}" height="${COVER_H}" fill="${hexA(dcol, dark ? .34 : .2)}"/>`);
+      L.push(`<text x="${(x + CARD_W - 12).toFixed(2)}" y="${y + COVER_H - 16}" font-size="44" font-weight="700"
+        text-anchor="end" font-family="${MONO}" fill="${dcol}" opacity="0.26">${esc(r.d)}</text>`);
+    }
+    L.push(`<rect x="${X}" y="${y + COVER_H - 2}" width="${Wd}" height="2" fill="${dcol}" opacity="0.65"/>`);
     L.push('</g>');
     L.push(`<rect x="${X}" y="${y}" width="${Wd}" height="${CARD_H}" rx="10" fill="none"
-      stroke="${top3 ? hexA(p.mint, .55) : hexA(tier, dark ? .22 : .34)}" stroke-width="1"/>`);
+      stroke="${top3 ? hexA(p.mint, .6) : hexA(tier, .24)}" stroke-width="1"/>`);
 
-    /* 序号 + Phi/FC 角标 */
-    L.push(`<text x="${TX}" y="${y + 24}" font-size="9" fill="${top3 ? p.mint : small}"
-      font-family="${MONO}" font-weight="${top3 ? 600 : 400}">${String(i + 1).padStart(2, '0')}</text>`);
+    /* 序号：压在曲绘上，用半透明黑底保证任何图上都读得清 */
+    const idx = String(i + 1).padStart(2, '0');
+    const iw = measure(idx, 8.5, { mono: true, weight: 600 });
+    L.push(`<rect x="${(x + 8).toFixed(2)}" y="${y + 9}" width="${(iw + 11).toFixed(2)}" height="15" rx="4"
+      fill="rgba(0,0,0,.52)"/>`);
+    L.push(`<text x="${(x + 8 + (iw + 11) / 2).toFixed(2)}" y="${y + 19.6}" font-size="8.5" font-weight="600"
+      text-anchor="middle" font-family="${MONO}" fill="${top3 ? p.mint : '#ffffff'}">${idx}</text>`);
+
+    /* Phi / FC 角标跟在序号后面 */
     const tag = r.a >= 99.995 ? 'PHI' : (r.fc ? 'FC' : '');
     if (tag) {
-      const iw = measure(String(i + 1).padStart(2, '0'), 9, { mono: true });
-      const tw = measure(tag, 7.5, { weight: 700 }) + 8;
-      const tx = x + 14 + iw + 5;
+      const tw = measure(tag, 7.5, { weight: 700 }) + 9;
+      const tx = x + 8 + iw + 11 + 4;
       if (tx + tw < x + CARD_W - 62) {
-        L.push(`<rect x="${tx.toFixed(2)}" y="${y + 13}" width="${tw.toFixed(2)}" height="14" rx="3.5"
-          fill="${tag === 'PHI' ? s.mintSoft : s.accentSoft}"/>`);
-        L.push(`<text x="${(tx + tw / 2).toFixed(2)}" y="${y + 23}" font-size="7.5" font-weight="700"
-          text-anchor="middle" fill="${tag === 'PHI' ? p.mint : p.accent2}">${tag}</text>`);
+        L.push(`<rect x="${tx.toFixed(2)}" y="${y + 9.5}" width="${tw.toFixed(2)}" height="14" rx="3.5"
+          fill="rgba(0,0,0,.52)"/>`);
+        L.push(`<text x="${(tx + tw / 2).toFixed(2)}" y="${y + 19.5}" font-size="7.5" font-weight="700"
+          text-anchor="middle" fill="${tag === 'PHI' ? p.mint : '#ffffff'}">${tag}</text>`);
       }
     }
 
     /* 难度标签 */
     const dl = `${r.d} ${r2(r.c)}`;
     const dw = measure(dl, 8.5, { mono: true }) + 12;
-    L.push(`<rect x="${(x + CARD_W - 12 - dw).toFixed(2)}" y="${y + 13}" width="${dw.toFixed(2)}" height="15"
-      rx="4" fill="${dsoft}"/>`);
-    L.push(`<text x="${(x + CARD_W - 12 - dw / 2).toFixed(2)}" y="${y + 23.5}" font-size="8.5" fill="${dcol}"
-      text-anchor="middle" font-family="${MONO}">${esc(dl)}</text>`);
+    L.push(`<rect x="${(x + CARD_W - 8 - dw).toFixed(2)}" y="${y + 9}" width="${dw.toFixed(2)}" height="15"
+      rx="4" fill="${hexA(dcol, .94)}"/>`);
+    L.push(`<text x="${(x + CARD_W - 8 - dw / 2).toFixed(2)}" y="${y + 19.6}" font-size="8.5" fill="${contrastOn(dcol)}"
+      text-anchor="middle" font-family="${MONO}" font-weight="600">${esc(dl)}</text>`);
 
     /* 曲名：最多两行 */
-    const lines = wrap(r.n, CARD_W - 26, 11.5, 2);
+    const lines = wrap(r.n, CARD_W - 24, 11.5, 2);
     lines.forEach((ln, k) => {
-      L.push(`<text x="${TX}" y="${y + 46 + k * 14}" font-size="11.5" fill="${p.text}">${esc(ln)}</text>`);
+      L.push(`<text x="${TX}" y="${y + 108 + k * 14}" font-size="11.5" fill="${p.text}">${esc(ln)}</text>`);
     });
 
-    /* 左下达成率 / 右下单曲 RKS：小标签在上，数值在下 */
-    L.push(`<text x="${TX}" y="${y + 76}" font-size="7" letter-spacing="1" fill="${small}"
+    /* 达成率 / 单曲 RKS：小标签在上，数值在下 */
+    L.push(`<text x="${TX}" y="${y + 136}" font-size="7" letter-spacing="1" fill="${small}"
       font-family="${MONO}">${esc(t('poster.accShort'))}</text>`);
-    L.push(`<text x="${TX}" y="${y + 89}" font-size="14" font-weight="700" font-family="${MONO}"
+    L.push(`<text x="${TX}" y="${y + 151}" font-size="13.5" font-weight="700" font-family="${MONO}"
       fill="${r.a >= 99.995 ? p.mint : p.text}">${esc(r2(r.a) + '%')}</text>`);
 
-    L.push(`<text x="${TR}" y="${y + 76}" font-size="7" letter-spacing="1" fill="${small}"
+    L.push(`<text x="${TR}" y="${y + 136}" font-size="7" letter-spacing="1" fill="${small}"
       text-anchor="end" font-family="${MONO}">RKS</text>`);
-    L.push(`<text x="${TR}" y="${y + 89}" font-size="13" font-weight="600" font-family="${MONO}"
+    L.push(`<text x="${TR}" y="${y + 151}" font-size="13" font-weight="600" font-family="${MONO}"
       text-anchor="end" fill="${top3 ? p.mint : p.accent2}">${r2(r.rk)}</text>`);
-
-    /* 底部强度条：同批曲目之间的相对强弱 */
-    const bw = CARD_W - 26;
-    L.push(`<rect x="${TX}" y="${y + 100}" width="${bw.toFixed(2)}" height="3" rx="1.5" fill="${p.line}"/>`);
-    L.push(`<rect x="${TX}" y="${y + 100}" width="${(bw * ratio).toFixed(2)}" height="3"
-      rx="1.5" fill="${dcol}" opacity="0.9"/>`);
   });
 
   /* --- 页脚 --- */
@@ -330,14 +337,82 @@ function safeName(s) {
   return String(s || 'player').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 24);
 }
 
+/* ---------- 曲绘 ---------- */
+/* 走本站 /api/jacket/<曲名.曲师>：服务端已经把原图缩成 320px 的 webp 并落盘缓存，
+   所以这里拿到的都是十几 KB 的小图。曲绘本项目不分发，导出时按需取，
+   取不到（下架曲 / 新曲 / 离线 / 双击打开的 file://）就跳过，版式退回难度色块。
+   图片必须内联成 dataURL —— SVG 经 Blob → <img> → canvas 这条路不会去加载外链。 */
+const ART_CACHE = new Map();   // id -> dataURL（只缓存成功的）
+/* 曲绘 URL 带版本号：老版本曾经把 404 缓存住，换个版本号让浏览器重新取一次 */
+const ART_VER = 2;
+
+/* 曲绘的键：优先用曲库 id，查不到的（示例曲 / 新曲）退回曲名，
+   服务端还有一级「只按曲名」的兜底匹配 */
+function artKey(r) {
+  return PL.resolveId(r) || String((r && r.n) || '').trim();
+}
+
+function blobDataURL(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result));
+    fr.onerror = () => rej(new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+async function loadJackets(rows, onProgress) {
+  const out = new Map();
+  /* 双击 index.html 打开时没有服务端，直接跳过，别发一堆必然失败的请求 */
+  if (location.protocol === 'file:') return out;
+
+  const ids = [];
+  for (const r of rows) {
+    const id = artKey(r);
+    if (id && ids.indexOf(id) < 0) ids.push(id);
+  }
+  let done = 0;
+  const tick = () => {
+    done += 1;
+    if (onProgress) { try { onProgress(done, ids.length); } catch (e) {} }
+  };
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      if (ART_CACHE.has(id)) { out.set(id, ART_CACHE.get(id)); tick(); continue; }
+      try {
+        /* 走默认缓存策略：命中过的图服务端带 immutable，浏览器自然会留；
+           不能写 force-cache，否则会把以前那次 404 当结果一直用下去 */
+        const res = await fetch('/api/jacket/' + encodeURIComponent(id) + '?v=' + ART_VER);
+        if (!res.ok) throw new Error('http ' + res.status);
+        const url = await blobDataURL(await res.blob());
+        ART_CACHE.set(id, url);
+        out.set(id, url);
+      } catch (e) {
+        /* 这次的失败不进缓存：可能是瞬时网络问题，下次导出再试一遍 */
+      }
+      tick();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, worker));
+  return out;
+}
+
 /**
  * 生成并下载 B30 图片
- * @param {{scale?:number, download?:boolean}} opts
+ * @param {{scale?:number, download?:boolean, art?:boolean, onProgress?:Function}} opts
  * @returns {Promise<{blob:Blob, filename:string}>}
  */
 async function exportB30Image(opts) {
   const o = opts || {};
-  const pack = buildSVG();
+  const rows = analysis().sorted.slice(0, 30);
+  let jackets = new Map();
+  if (o.art !== false && rows.length) {
+    try { jackets = await loadJackets(rows, o.onProgress); } catch (e) { jackets = new Map(); }
+  }
+  const pack = buildSVG(jackets);
   const scale = o.scale || 2;
   const blob = await rasterize(pack.svg, pack.w, pack.h, scale);
 
@@ -356,8 +431,16 @@ async function exportB30Image(opts) {
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
-  return { blob, filename, width: Math.round(pack.w * scale), height: Math.round(pack.h * scale) };
+  return {
+    blob, filename, width: Math.round(pack.w * scale), height: Math.round(pack.h * scale),
+    cards: pack.count, art: jackets.size
+  };
 }
 
-Object.assign(PL, { buildB30SVG: buildSVG, exportB30Image, rasterizeSVG: rasterize });
+Object.assign(PL, {
+  buildB30SVG: jackets => buildSVG(jackets),
+  exportB30Image,
+  rasterizeSVG: rasterize,
+  loadJackets
+});
 })();

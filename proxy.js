@@ -302,6 +302,135 @@ function sendJson(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// ---------- 曲绘缩略图（B30 分享图用） ----------
+// 曲绘是南京鸽游的游戏资源，本项目不分发。导出图片时按需从第三方镜像取缩略图，
+// 由本服务落盘缓存后转发——这样浏览器只跟同源通信，不用管对方有没有 CORS，
+// 也不至于为了 30 张图传 90MB 原图（单张原图 1.5~3.4MB）。
+// data/jackets.json 只存文件名清单（tools/build_jackets.js 生成），不含图片本体。
+const JACKET_DIR = path.join(__dirname, 'data', 'jackets');
+const JACKET_INDEX = path.join(__dirname, 'data', 'jackets.json');
+// 两个都是同一家（wsrv.nl 是 images.weserv.nl 的新域名）的免费缩图服务，互为备份
+const JACKET_RESIZERS = ['https://wsrv.nl/?url=', 'https://images.weserv.nl/?url='];
+const JACKET_Q = '&w=320&h=320&fit=cover&output=webp&q=76';
+const JACKET_TTL = 30 * 24 * 3600 * 1000;   // 缓存 30 天
+const JACKET_MISS_TTL = 6 * 3600 * 1000;    // 取不到（网络问题）记 6 小时
+const jacketMiss = new Map();               // id -> 时间戳
+const jacketInflight = new Map();           // id -> Promise，避免并发重复拉
+
+/* 曲名.曲师 这种 id 各家用得不一样：有的写 `Evanescent.LeaF`，有的写
+   `Evanescent - LeaF`，还有只写曲名的。统一去掉标点空格再比。 */
+function jNorm(s) {
+  return String(s || '').toLowerCase().replace(/[^0-9a-z\u3040-\u30ff\u4e00-\u9fff]/g, '');
+}
+
+let jacketTable = null;
+function jacketLookup() {
+  if (jacketTable) return jacketTable;
+  jacketTable = [];
+  let json = null;
+  try { json = JSON.parse(fs.readFileSync(JACKET_INDEX, 'utf8')); } catch (e) { return jacketTable; }
+  for (const src of (json.sources || [])) {
+    const exact = new Map(), norm = new Map(), nameOnly = new Map();
+    for (const f of (src.files || [])) {
+      const stem = String(f).replace(/\.(png|jpe?g|webp)$/i, '');
+      exact.set(stem, f);
+      if (!norm.has(jNorm(stem))) norm.set(jNorm(stem), f);
+      const nm = jNorm(stem.split('.')[0]);
+      if (!nm) continue;
+      /* 同名多首（Another Me 之类）就别猜了，宁可留空 */
+      if (!nameOnly.has(nm)) nameOnly.set(nm, f);
+      else if (nameOnly.get(nm) !== f) nameOnly.set(nm, null);
+    }
+    jacketTable.push({ base: src.base, count: exact.size, exact, norm, nameOnly });
+  }
+  return jacketTable;
+}
+
+/** 精确 → 去标点归一化 → 只按曲名（唯一时）。任何一级命中都返回 {base, file} */
+function jacketFileFor(id) {
+  const raw = String(id || '').trim().replace(/\.(png|jpe?g|webp)$/i, '');
+  const norm = jNorm(raw);
+  const nameKey = jNorm(raw.split('.')[0]);
+  if (!norm) return null;
+  for (const src of jacketLookup()) {
+    const f = src.exact.get(raw) || src.norm.get(norm) || src.nameOnly.get(nameKey);
+    if (f) return { base: src.base, file: f };
+  }
+  return null;
+}
+
+function jacketKey(id) {
+  return crypto.createHash('sha1').update(id).digest('hex').slice(0, 16);
+}
+
+async function jacketDownload(id) {
+  const found = jacketFileFor(id);
+  if (!found) throw Object.assign(new Error('not in index'), { code: 'noart' });
+  const src = found.base + encodeURIComponent(found.file);
+  let last = '';
+  for (const host of JACKET_RESIZERS) {
+    try {
+      const r = await fetch(host + encodeURIComponent(src) + JACKET_Q, {
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!r.ok) { last = 'upstream ' + r.status; continue; }
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length < 600) { last = 'too small (' + buf.length + 'B)'; continue; }
+      return buf;
+    } catch (e) {
+      last = e.name === 'TimeoutError' ? 'timeout' : (e.message || String(e));
+    }
+  }
+  throw new Error(last || 'fetch failed');
+}
+
+async function handleJacket(req, res, url) {
+  let id = '';
+  try { id = decodeURIComponent(url.pathname.replace(/^\/api\/jacket\/?/, '')); } catch (e) {}
+  id = String(id).trim().slice(0, 120);
+  if (!id || /[\\/]/.test(id)) return sendJson(res, 400, { error: 'bad id' });
+  /* 404 必须显式 no-store：不然浏览器会按启发式把「这首没图」缓存住，
+     之后前端就算带 force-cache 也永远拿那次的 404 */
+  const miss = (obj) => {
+    cors(res);
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(obj));
+  };
+
+  const file = path.join(JACKET_DIR, jacketKey(id) + '.webp');
+  const hit = t => { try { res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': t.length, 'Cache-Control': 'public, max-age=2592000, immutable', 'Access-Control-Allow-Origin': '*' }); res.end(t); } catch (e) {} };
+
+  try {
+    const st = fs.statSync(file);
+    if (Date.now() - st.mtimeMs < JACKET_TTL) return hit(fs.readFileSync(file));
+  } catch (e) {}
+
+  /* 索引里就没有这首（下架曲 / 太新的曲）——不必去打扰上游，直接 404 */
+  if (!jacketFileFor(id)) return miss({ error: 'no jacket', code: 'noart' });
+
+  const missAt = jacketMiss.get(id);
+  if (missAt && Date.now() - missAt < JACKET_MISS_TTL) return miss({ error: 'no jacket', code: 'miss' });
+
+  let job = jacketInflight.get(id);
+  if (!job) {
+    job = jacketDownload(id).finally(() => jacketInflight.delete(id));
+    jacketInflight.set(id, job);
+  }
+
+  try {
+    const buf = await job;
+    try {
+      fs.mkdirSync(JACKET_DIR, { recursive: true });
+      fs.writeFileSync(file, buf);
+    } catch (e) {}
+    return hit(buf);
+  } catch (e) {
+    jacketMiss.set(id, Date.now());
+    if (jacketMiss.size > 2000) jacketMiss.clear();
+    return miss({ error: 'no jacket', code: 'miss', detail: e.message });
+  }
+}
+
 async function handleLoginStart(res, url) {
   const server = url.searchParams.get('server') === 'global' ? 'global' : 'cn';
   const code = await taptapLib.requestCode(server);
@@ -468,6 +597,11 @@ const server = http.createServer(async (req, res) => {
   // 直接上传 .save（zip）解析：原始字节 POST 过来即可
   if (url.pathname === '/api/phi/parse' && req.method === 'POST') {
     return handleParseUpload(req, res);
+  }
+
+  // 曲绘缩略图：/api/jacket/<曲名.曲师>
+  if (url.pathname.startsWith('/api/jacket/')) {
+    return handleJacket(req, res, url);
   }
 
   // 曲库：前端用来算覆盖率 / 未游玩的高定数谱

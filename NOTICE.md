@@ -11,6 +11,23 @@ Phigros Lab 是非官方粉丝工具，与 Pigeon Games 无任何关联。
 
 社区整理的 Phigros 曲目表（曲名、曲师、曲绘师、谱师、各难度定数），用于本地曲库匹配。
 
+## 曲绘（导出 B30 图片时按需抓取）
+
+导出分享图时，服务端会按曲目 id 去第三方镜像取**曲绘的缩略图**（缩到 320px 的 webp），
+缓存到 `data/jackets/`（已在 `.gitignore` 中，不进仓库），再转发给前端。
+
+- **本项目不分发曲绘**：仓库里没有图片文件，只有 `data/jackets.json` 这份**文件名清单**
+  （由 `tools/build_jackets.js` 生成）。清单只用于匹配，不含图像数据。
+- 图片来源（个人维护的镜像，随时可能失效或被删除，并非官方渠道）：
+  [Shell-chen/phigros-illustration](https://github.com/Shell-chen/phigros-illustration)、
+  [NanLiang-Works-Inc/Phigros_Resource](https://github.com/NanLiang-Works-Inc/Phigros_Resource)。
+  曲绘版权归 **Pigeon Games** 及各位曲绘师所有。
+- 缩图由 [wsrv.nl](https://wsrv.nl)（images.weserv.nl 的镜像）完成，同样的图也会走一次它的服务。
+- 取不到（下架曲、太新的曲、离线、双击 `index.html` 打开）时会自动退回「难度色块」版式，
+  不影响导出。
+- 想完全关掉这个行为：删掉 `data/jackets.json` 即可，服务端找不到清单就直接返回 404，
+  图片一律走色块。
+
 ## data/charts.csv
 
 由 `tools/build_charts.py` 从

@@ -1342,8 +1342,12 @@ function bindEvents() {
     btn.disabled = true;
     btn.textContent = t('poster.exporting');
     try {
-      const res = await PL.exportB30Image();
-      toast(t('poster.done') + ' · ' + res.width + '×' + res.height);
+      const res = await PL.exportB30Image({
+        /* 首次导出要抓 30 张曲绘（之后走缓存），顺手把进度显示在按钮上 */
+        onProgress: (d, n) => { btn.textContent = t('poster.art', { d, n }); }
+      });
+      const art = res.art ? t('poster.withArt', { n: res.art }) : '';
+      toast(t('poster.done') + ' · ' + res.width + '×' + res.height + (art ? ' · ' + art : ''));
     } catch (e) {
       toast(t('poster.fail', { e: e.message || e }), 'err');
     } finally {
