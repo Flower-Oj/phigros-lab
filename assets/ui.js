@@ -991,12 +991,29 @@ async function bind() {
   }
 }
 
+/* 把 TapTap 给的 qrcode_url 画成二维码。官方要求接入端自己按 qrcode_url 出码，
+   链接里带着 ?qrcode=1&user_code=，扫到就能直接授权，不用手填短码。 */
+function drawLoginQR(url) {
+  const wrap = $('#loginQrWrap'), box = $('#loginQr');
+  if (!wrap || !box) return;
+  if (!url || !window.PLQR) { wrap.hidden = true; box.innerHTML = ''; return; }
+  try {
+    /* 二维码固定黑码白底：跟随主题反而会降低识别率 */
+    box.innerHTML = PLQR.toSVG(PLQR.encode(url), { margin: 2, dark: '#000000', light: '#ffffff' });
+    wrap.hidden = false;
+  } catch (e) {
+    wrap.hidden = true;
+    box.innerHTML = '';
+  }
+}
+
 async function startLogin() {
   const box = $('#loginBox'), st = $('#loginStatus');
   box.hidden = false;
   st.className = 'msg';
   st.textContent = t('login.requesting');
   $('#loginCode').textContent = '·····';
+  drawLoginQR('');
   try {
     const r = await fetch('/api/phi/login');
     const j = await r.json();
@@ -1005,6 +1022,7 @@ async function startLogin() {
     const a = $('#loginLink');
     a.textContent = j.url;
     a.href = j.url;
+    drawLoginQR(j.url);
     st.textContent = t('login.waiting', { m: Math.round(j.expiresIn / 60) });
     pollLogin(j.id);
   } catch (e) {
@@ -1029,7 +1047,12 @@ async function pollLogin(id) {
         return pullToken(j.token);
       }
       if (j.status === 'scanned') { st.textContent = t('login.scanned'); st.className = 'msg'; }
-      if (j.status === 'expired') { st.className = 'msg err'; st.textContent = t('login.expired'); return; }
+      if (j.status === 'expired') {
+        st.className = 'msg err';
+        st.textContent = t('login.expired');
+        drawLoginQR('');
+        return;
+      }
       if (!r.ok) { st.className = 'msg err'; st.textContent = j.error || t('msg.loginErr'); return; }
     } catch (e) {}
   }

@@ -271,9 +271,13 @@
           </div>
           <div class="msg" id="bindMsg"></div>
           <div id="loginBox" class="login-box" hidden>
-            <div class="ltag" data-i18n="data.loginTip">在 TapTap 里输入这个字符码，或点下面的链接扫码</div>
-            <div class="login-code" id="loginCode"></div>
-            <a id="loginLink" href="#" target="_blank" rel="noreferrer"></a>
+            <div class="qr-wrap" id="loginQrWrap" hidden>
+              <div class="qr-img" id="loginQr"></div>
+              <div class="qr-hint" data-i18n="data.loginScan">用 TapTap App 扫这个码授权</div>
+            </div>
+            <div class="ltag" data-i18n="data.loginTip">也可以手动打开链接，或把字符码填进 TapTap 的授权页</div>
+            <div class="login-code"><span data-i18n="data.loginCodeLabel">字符码</span> <b id="loginCode"></b></div>
+            <a id="loginLink" class="login-link" href="#" target="_blank" rel="noreferrer"></a>
             <div class="msg" id="loginStatus"></div>
           </div>
         </section>
@@ -456,6 +460,7 @@
 <script src="assets/i18n.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/charts.js"></script>
+<script src="assets/qrcode.js"></script>
 <script src="assets/b30image.js"></script>
 <script src="assets/ui.js"></script>
 <script src="assets/bridge.js"></script>

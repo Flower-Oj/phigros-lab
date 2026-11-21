@@ -119,7 +119,7 @@ node phi.js login
 
 手机 TapTap 扫码（或在浏览器里登录后确认），终端会自动收尾并打印 token，存到 `data/.session`。**之后所有指令都不必再带 token。**
 
-网页里也一样：「数据源 → 扫码登录」→ 显示字符码和链接 → 授权后自动填 token 并拉取 B30。
+网页里也一样：「数据源 → 扫码登录」→ 直接出二维码（按 TapTap 返回的 `qrcode_url` 生成，带 `?qrcode=1&user_code=`，扫到即授权，不用手填短码）→ 手机确认后自动填 token 并拉取 B30。二维码是本项目自己编码的（`assets/qrcode.js`，零依赖，byte 模式 / 纠错 M / 版本 1–10），不依赖任何第三方出图接口。
 
 也可以手动拿：在 Phi-Plugin 等机器人里发 `#phi tk help`，按提示扫码复制。
 
@@ -225,6 +225,7 @@ phigros-lab/
 │  ├─ core.js        状态 / 存储 / RKS 计算 / 曲库 / 导入导出 / 诊断
 │  ├─ charts.js      手写 SVG 图表
 │  ├─ b30image.js    B30 分享图：SVG 拼版 → canvas → PNG
+│  ├─ qrcode.js      零依赖二维码编码（登录用），byte 模式 / 纠错 M / 版本 1–10
 │  └─ ui.js          渲染、交互、AI 流式输出
 ├─ phi.js            命令行工具
 ├─ proxy.js          本地服务：静态托管 + DeepSeek 转发 + 云存档接口
