@@ -8,6 +8,9 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.PORT || 8787);
+// 托管到公网时平台会注入 PORT，此时必须监听 0.0.0.0 才能被反代到；
+// 本地手跑不设 PORT，保持只听环回，别把 AI 转发接口暴露给整个局域网。
+const HOST = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 const ROOT = __dirname;
 
 const saveLib = require('./lib/save');
@@ -323,10 +326,10 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  Phigros Lab 已启动');
-  console.log('  http://localhost:' + PORT);
+  console.log('  http://' + (HOST === '0.0.0.0' ? 'localhost' : HOST) + ':' + PORT);
   console.log('');
   console.log('  DeepSeek 转发:  /api/ai');
   console.log('  云存档成绩  :  /api/phi/b30?tk=<token>');
