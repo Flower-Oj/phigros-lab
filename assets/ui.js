@@ -1430,6 +1430,11 @@ function init() {
   const h = location.hash.slice(1);
   if (TABS.includes(h)) switchTab(h);
 
+  // 安卓客户端跑的是同一套页面，但没有 download/ 目录，别摆一个点了 404 的入口
+  if (window.PhigrosAndroid) {
+    ['#appLink', '#setAppRow'].forEach(sel => { const el = $(sel); if (el) el.remove(); });
+  }
+
   // 首次进入走一遍教程。看过一次就记下来，之后不再打扰（设置里可以重看）
   let seen = '1';
   try { seen = localStorage.getItem(K.tour) || ''; } catch (e) {}
