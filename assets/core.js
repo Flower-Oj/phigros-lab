@@ -348,6 +348,7 @@ async function loadLibrary() {
     return list;
   } catch (e) {
     S.library = [];
+    S.statsLoaded = true; // 曲库都没了，别再让预览等统计
     return [];
   }
 }
@@ -385,7 +386,19 @@ async function loadChartStats() {
         combo
       };
     }
-  } catch (err) {}
+  } catch (err) {
+  } finally {
+    S.statsLoaded = true;
+    (S.statsWaiters || []).forEach(fn => { try { fn(); } catch (e) {} });
+    S.statsWaiters = [];
+  }
+}
+
+/** 谱面统计是否已经加载完（曲库先到，统计后到，中间有个小窗口） */
+function statsReady() { return !S.library || !!S.statsLoaded; }
+function onStats(fn) {
+  if (statsReady()) return fn();
+  (S.statsWaiters = S.statsWaiters || []).push(fn);
 }
 
 /** 曲库覆盖与未游玩的高定数谱 */
@@ -904,6 +917,6 @@ Object.assign(PL, {
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, resolveId, composerOf, chartOf, diagItems,
   importText, parseLines, exportJSON, pushSnapshot,
-  buildPrompt, offlineReport, PRESETS, clientId, VERSION
+  buildPrompt, offlineReport, PRESETS, clientId, VERSION, statsReady, onStats
 });
 })();

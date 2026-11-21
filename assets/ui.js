@@ -539,14 +539,26 @@ function chartHTML(c) {
 }
 
 function openChart(name, diff) {
-  const c = chartOf(name, diff);
-  if (!c.lib && !c.diffs.length) return toast(t('toast.unknownSong'), 'err');
   const card = $('#chartCard');
-  card.dataset.song = c.lib ? c.song : name;
-  card.innerHTML = chartHTML(c);
+  const draw = d => {
+    const c = chartOf(name, d || diff);
+    if (!c.lib && !c.diffs.length) return false;
+    card.dataset.song = c.lib ? c.song : name;
+    card.dataset.diff = c.diff || '';
+    card.innerHTML = chartHTML(c);
+    const close = $('#chartClose');
+    if (close) close.addEventListener('click', closeChart);
+    return true;
+  };
+  if (!draw(diff)) return toast(t('toast.unknownSong'), 'err');
+  ui.chartName = name;
   $('#chartModal').hidden = false;
-  const close = $('#chartClose');
-  if (close) close.addEventListener('click', closeChart);
+  // 曲库先到、谱面统计后到，赶在中间点开会误判「未收录」——统计到了再重画一次
+  if (PL.statsReady()) return;
+  PL.onStats(() => {
+    if ($('#chartModal').hidden || ui.chartName !== name) return;
+    draw(card.dataset.diff || diff);
+  });
 }
 
 function closeChart() { $('#chartModal').hidden = true; }
