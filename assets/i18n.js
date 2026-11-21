@@ -383,6 +383,9 @@ const D = {
   /* ---------- 分享图 ---------- */
   'poster.noName': ['匿名玩家', 'Anonymous'],
   'poster.records': ['记录数', 'Records'],
+  'poster.b27': ['B27 均', 'B27 avg'],
+  'poster.b3': ['B3 均', 'B3 avg'],
+  'poster.accShort': ['达成率', 'ACC'],
   'poster.madeBy': ['由 Phigros Lab 生成', 'Made with Phigros Lab'],
   'poster.exporting': ['生成中…', 'Rendering…'],
   'poster.done': ['B30 图片已保存', 'B30 image saved'],
