@@ -17,7 +17,7 @@
 > APK 完全跑在手机上，没有服务端的免费额度，AI 教练需要自己在右上角填 DeepSeek API Key。
 
 > 在线版是公开实例：`proxy.js` 会把你的 sessionToken 转发给 LeanCloud、把 API Key 转发给 DeepSeek。
-> 转发过程不落盘、不打日志（只透传 `Authorization`），但对凭证特别敏感的话，建议本地跑一份。
+> 转发过程不落盘、不打日志（自己的 API Key 走 `X-User-Key` 请求头透传），但对凭证特别敏感的话，建议本地跑一份。
 
 ### 免费 AI 额度（每个 IP 每天 3 次）
 

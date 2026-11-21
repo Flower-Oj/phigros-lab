@@ -41,7 +41,7 @@ const MIME = {
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-User-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 }
 
@@ -60,7 +60,21 @@ function readFreeKey() {
   }
 }
 
-const FREE_KEY = String(process.env.FREE_KEY || readFreeKey()).trim();
+/**
+ * 文件优先于环境变量：部署到托管平台时，环境里可能已经有一个来路不明的
+ * FREE_KEY，那种情况下以仓库里我们自己的文件为准，免得免费额度用到别人的 key。
+ */
+function pickFreeKey() {
+  const fromFile = readFreeKey();
+  if (fromFile) return { key: fromFile, src: 'file' };
+  const fromEnv = String(process.env.FREE_KEY || '').trim();
+  if (fromEnv) return { key: fromEnv, src: 'env' };
+  return { key: '', src: 'none' };
+}
+
+const _fk = pickFreeKey();
+const FREE_KEY = _fk.key;
+const FREE_KEY_SRC = _fk.src;
 
 const quota = { day: '', buckets: new Map(), total: 0 };
 // 额度落盘：平台重启沙箱时内存会清空，不能让「每天 3 次」被重启刷掉
@@ -174,10 +188,11 @@ function proxyAI(req, res, body) {
   }
   const payload = JSON.stringify({ ...parsed, stream: true });
 
-  // 只有真的带了 token 才算「用自己的 Key」；只写了个 Bearer 前缀的当没带，
-  // 否则这种残废请求会打到上游吃 401，用户还以为自己的 Key 坏了。
-  const authRaw = String(req.headers.authorization || '').trim();
-  const own = /^Bearer\s+\S/i.test(authRaw) ? authRaw : '';
+  // 只认 X-User-Key：托管平台会往每个请求里注入它自己的 Authorization，
+  // 拿 Authorization 判断「用户带没带 Key」会被那条注入的头骗过去——
+  // 结果就是免费额度永远不走，上游还按注入的 Key 回 401。
+  const userKey = String(req.headers['x-user-key'] || '').trim();
+  const own = userKey ? 'Bearer ' + userKey : '';
   const useFree = !own;
 
   if (useFree) {
@@ -413,10 +428,9 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/ai/quota') {
     const used = quotaUsed(req);
     return sendJson(res, 200, {
-      free: !!FREE_KEY,
-      perIp: FREE_PER_IP,
-      used,
-      left: FREE_KEY ? Math.max(0, FREE_PER_IP - used) : 0
+      free: !!FREE_KEY, perIp: FREE_PER_IP, used,
+      left: FREE_KEY ? Math.max(0, FREE_PER_IP - used) : 0,
+      keySrc: FREE_KEY_SRC
     });
   }
 

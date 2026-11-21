@@ -502,7 +502,9 @@ async function callAI(messages, onDelta, model, signal) {
     }));
   }
   const gw = { 'Content-Type': 'application/json', 'X-Client-Id': clientId() };
-  if (S.key) gw['Authorization'] = 'Bearer ' + S.key;
+  // 走自己的 Key 时用 X-User-Key 传：托管平台会往每个请求塞它自己的 Authorization，
+  // 用那个头传 Key 会被覆盖掉，后端也没法靠它判断「用户带没带 Key」。
+  if (S.key) gw['X-User-Key'] = S.key;
   attempts.push(() => fetch('/api/ai', {
     method: 'POST', signal, headers: gw, body: JSON.stringify(body)
   }));
