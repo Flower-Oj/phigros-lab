@@ -11,7 +11,7 @@ const {
   $, $$, esc, r2, r3, r4, signed, timeAgo, dateStr, S, K,
   analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, composerOf, diagItems, saveLS, loadLS,
-  importText, exportJSON, pushSnapshot, buildPrompt, offlineReport, PRESETS
+  importText, exportJSON, pushSnapshot, buildPrompt, offlineReport, PRESETS, clientId
 } = PL;
 
 /* ---------------- 全局界面状态 ---------------- */
@@ -491,25 +491,36 @@ function outScroll() {
 
 async function callAI(messages, onDelta, model, signal) {
   const body = { model: model || 'deepseek-chat', messages, stream: true, temperature: 0.55, max_tokens: 2200 };
-  const attempts = [
-    () => fetch('https://api.deepseek.com/chat/completions', {
+
+  // 自己的 Key 优先直连 DeepSeek；没有 Key 就只走后端，用站点的免费额度。
+  const attempts = [];
+  if (S.key) {
+    attempts.push(() => fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.key },
       body: JSON.stringify(body)
-    }),
-    () => fetch('/api/ai', {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.key },
-      body: JSON.stringify(body)
-    })
-  ];
+    }));
+  }
+  const gw = { 'Content-Type': 'application/json', 'X-Client-Id': clientId() };
+  if (S.key) gw['Authorization'] = 'Bearer ' + S.key;
+  attempts.push(() => fetch('/api/ai', {
+    method: 'POST', signal, headers: gw, body: JSON.stringify(body)
+  }));
+
   let res = null, lastErr = null;
   for (const fn of attempts) {
     try {
       res = await fn();
       if (res.ok) break;
       if (res.status === 401) throw new Error(t('ai.err401'));
-      if (res.status === 402 || res.status === 429) throw new Error(t('ai.err429', { c: res.status }));
+      if (res.status === 402 || res.status === 429 || res.status === 503) {
+        // 后端会给出人话（免费额度用完 / 没配 Key / 免费 Key 失效），优先用它
+        let detail = '', code = '';
+        try { const j = await res.json(); detail = (j && j.error) || ''; code = (j && j.code) || ''; } catch (e) {}
+        const err = new Error(detail || t('ai.err429', { c: res.status }));
+        err.code = code; // FREE_* 时不提示「先跑 node proxy.js」，那不是网络问题
+        throw err;
+      }
       lastErr = new Error('HTTP ' + res.status);
       res = null;
     } catch (e) {
@@ -551,11 +562,10 @@ function setBusy(on) {
 
 async function generate() {
   if (!S.data.length) return toast(t('toast.needData'), 'err');
-  if (!S.key) { openKeyModal(); return toast(t('ai.needKey'), 'err'); }
-
+  // 没有自己的 Key 也能跑：后端有免费额度，用完了后端会给出明确提示
   const out = $('#out');
   setBusy(true);
-  $('#aiState').textContent = t('ai.generating');
+  setState(t('ai.generating'));
   const prompt = buildPrompt(S.preset);
   S.msgs = [{ role: 'user', content: prompt }];
   let acc = '';
@@ -570,25 +580,64 @@ async function generate() {
     }, S.model, ui.aborter.signal);
     S.msgs.push({ role: 'assistant', content: acc });
     out.innerHTML = md(acc);
-    $('#aiState').textContent = t('ai.done', { n: acc.length });
+    setState(t('ai.done', { n: acc.length }));
   } catch (e) {
     if (e.name === 'AbortError') {
       out.innerHTML = md(acc) + '<p class="hint">' + esc(t('ai.stopped')) + '</p>';
     } else {
+      // 额度类的错误跟网络无关，别甩一句「先运行 node proxy.js」误导人
+      const isFree = /^FREE_/.test(e.code || '');
       out.innerHTML = `<p style="color:var(--rose)">${esc(t('ai.fail', { e: e.message || e }))}</p>
-        <p class="hint">${esc(t('ai.cors'))}<code>node proxy.js</code>${esc(t('ai.corsTail'))}</p>`;
-      $('#aiState').textContent = '';
+        <p class="hint">${isFree ? esc(t('ai.freeHint'))
+          : esc(t('ai.cors')) + '<code>node proxy.js</code>' + esc(t('ai.corsTail'))}</p>`;
+      // 报错本身就把原因说清楚了，别再追一句「额度用完了」
+      setState('');
+      $('#aiState').dataset.quota = '1';
     }
   }
   setBusy(false);
   ui.aborter = null;
+  syncQuota();
+}
+
+/**
+ * 状态行统一入口：记住「主文案」，免费额度作为副文案追加在后面。
+ * 各处直接写 textContent 会把追加的额度冲掉，所以状态行只从这里写。
+ */
+function setState(txt) {
+  const el = $('#aiState');
+  if (!el) return;
+  el.dataset.base = txt || '';
+  el.textContent = txt || '';
+  el.dataset.quota = '';
+  syncQuota();
+}
+
+/**
+ * 没填自己的 Key 时，把「今天还剩几次免费额度」拼到状态行后面。
+ * 只在状态行有主文案时追加，避免覆盖「生成中…」或者报错信息。
+ */
+async function syncQuota() {
+  const el = $('#aiState');
+  if (!el || S.key || ui.streaming || el.dataset.quota === '1') return;
+  try {
+    // 带上同一个 X-Client-Id：反代不给 XFF 时（比如本地直连），
+    // 后端按这个 id 分桶，不带的话这里查到的份数和实际消耗的对不上
+    const r = await fetch('/api/ai/quota', { headers: { 'X-Client-Id': clientId() } });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j.free || ui.streaming) return;
+    const txt = j.left > 0 ? t('ai.freeQuota', { n: j.left }) : t('ai.freeNone');
+    const base = el.dataset.base || '';
+    el.dataset.quota = '1';
+    el.textContent = base ? base + '　·　' + txt : txt;
+  } catch (e) {}
 }
 
 async function chat() {
   const input = $('#chatIn');
   const q = input.value.trim();
   if (!q) return;
-  if (!S.key) { openKeyModal(); return toast(t('ai.needKey'), 'err'); }
   if (!S.msgs.length) { await generate(); if (!S.msgs.length) return; }
 
   const out = $('#out');
@@ -617,6 +666,9 @@ async function chat() {
   setBusy(false);
   ui.aborter = null;
   outScroll();
+  // 聊天同样吃免费额度，追问完把状态行的剩余次数刷新一下
+  delete $('#aiState').dataset.quota;
+  syncQuota();
 }
 
 function runOffline() {
@@ -625,7 +677,7 @@ function runOffline() {
   const out = $('#out');
   out.innerHTML = md(report);
   S.msgs = [{ role: 'assistant', content: report }];
-  $('#aiState').textContent = t('ai.offlineState');
+  setState(t('ai.offlineState'));
   toast(t('toast.offlineDone'));
 }
 
@@ -817,6 +869,7 @@ function switchTab(name) {
   if (name === 'plan') renderPlanSide();
   if (name === 'ai' && !$('#out').dataset.init) {
     $('#out').dataset.init = '1';
+    syncQuota();
   }
 }
 

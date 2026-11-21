@@ -14,8 +14,35 @@
 
 安卓安装包见 **Releases** 页面的 `phigros-lab-2.1.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套后端，装完即可离线解析存档。
 
+> APK 完全跑在手机上，没有服务端的免费额度，AI 教练需要自己在右上角填 DeepSeek API Key。
+
 > 在线版是公开实例：`proxy.js` 会把你的 sessionToken 转发给 LeanCloud、把 API Key 转发给 DeepSeek。
 > 转发过程不落盘、不打日志（只透传 `Authorization`），但对凭证特别敏感的话，建议本地跑一份。
+
+### 免费 AI 额度（每个 IP 每天 3 次）
+
+在线版不填 API Key 也能生成分析，额度按 IP 每天 3 次，第四次会被拦下来并提示填自己的 Key。
+
+实现要点：**免费 Key 只存在服务端**，浏览器永远拿不到它。
+
+- Key 的读法：环境变量 `FREE_KEY`，没有就读 `data/.freekey`（单行，已 gitignore）
+- 额度参数：`FREE_PER_IP`（默认 3）、`FREE_GLOBAL`（全局每日上限，默认 200）
+- 计数只在真正调通上游（HTTP 200）之后才加，失败的请求不白吃额度
+- 计数落盘在 `data/.quota.json`，进程重启不清零，跨天自动重置
+- 静态路由拦截所有点开头的路径，`/data/.freekey`、`/data/.quota.json`、`/.git` 都是 404
+
+自己部署时想开这个功能：
+
+```bash
+echo 'sk-你的key' > data/.freekey      # 或者 export FREE_KEY=sk-...
+FREE_PER_IP=3 FREE_GLOBAL=200 node proxy.js
+```
+
+不想开就不放这个文件，`/api/ai` 会直接回 503 并让用户填自己的 Key。
+
+> 注意：额度按 IP 计，取 `X-Real-IP` 或 `X-Forwarded-For` 的**最右一跳**（最左边是客户端自己塞的，不可信）。
+> 反代既不给 IP 也不给 `X-Client-Id` 时退化成 socket 地址，这时同机房用户可能共用一个桶。
+
 
 ---
 

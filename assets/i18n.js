@@ -269,7 +269,7 @@ const D = {
 
   /* ---------- Key 弹窗 ---------- */
   'key.title': ['DeepSeek API Key', 'DeepSeek API Key'],
-  'key.desc': ['只保存在本机 localStorage，请求直接发往 api.deepseek.com。没有 Key 也能用本地分析。', 'Stored only in this browser\u2019s localStorage; requests go straight to api.deepseek.com. Local analysis works without a key.'],
+  'key.desc': ['只保存在本机 localStorage。不填也能用：站点每天赠送 3 次免费额度，填自己的 Key 则不限次数、不排队。', 'Stored only in this browser\u2019s localStorage. Not required: the site gives 3 free runs per day. Add your own key for unlimited use.'],
   'key.save': ['保存', 'Save'],
   'key.clear': ['清除', 'Clear'],
   'key.saved': ['已保存', 'Saved'],
@@ -370,6 +370,9 @@ const D = {
   'ai.err401': ['Key 无效或已失效', 'Invalid or expired API key'],
   'ai.err429': ['账户余额不足或限流（HTTP {c}）', 'Out of balance or rate-limited (HTTP {c})'],
   'ai.errReq': ['请求失败', 'Request failed'],
+  'ai.freeQuota': ['免费额度今天还剩 {n} 次', 'Free quota: {n} left today'],
+  'ai.freeNone': ['今天的免费额度用完了，点右上角钥匙填自己的 Key', "Today's free quota is used up — add your own key via the key button at top right"],
+  'ai.freeHint': ['点右上角钥匙填入自己的 DeepSeek API Key 就能继续用；站点的免费额度每天重置。', 'Add your own DeepSeek API key via the top-right key button to keep going — the site free quota resets every day.'],
   'msg.noScores': ['没有取到成绩', 'No scores returned'],
   'msg.unknownAcct': ['未知账号', 'Unknown account'],
   'msg.needToken': ['先填 token', 'Enter a token first'],

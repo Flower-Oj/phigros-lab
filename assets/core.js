@@ -108,8 +108,23 @@ const S = {
 
 const K = {
   key: 'pglab_key', notes: 'pglab_notes', data: 'pglab_data', meta: 'pglab_meta',
-  snap: 'pglab_snap', model: 'pglab_model', preset: 'pglab_preset', theme: 'pglab_theme'
+  snap: 'pglab_snap', model: 'pglab_model', preset: 'pglab_preset', theme: 'pglab_theme',
+  cid: 'pglab_cid'
 };
+
+/**
+ * 匿名客户端 id：只用来给「免费额度」分桶。
+ * 服务端优先按 IP 计，拿不到真实 IP 时才退到这个值，所以它不承担安全职责。
+ */
+function clientId() {
+  let id = '';
+  try { id = localStorage.getItem(K.cid) || ''; } catch (e) {}
+  if (!id) {
+    id = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { localStorage.setItem(K.cid, id); } catch (e) {}
+  }
+  return id;
+}
 
 function saveLS() {
   try {
@@ -819,6 +834,6 @@ Object.assign(PL, {
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, resolveId, composerOf, diagItems,
   importText, parseLines, exportJSON, pushSnapshot,
-  buildPrompt, offlineReport, PRESETS
+  buildPrompt, offlineReport, PRESETS, clientId
 });
 })();

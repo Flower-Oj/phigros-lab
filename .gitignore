@@ -25,3 +25,10 @@ desktop.ini
 
 # 部署时附带的可下载安装包（构建产物，不进 git）
 download/
+
+# 免费额度的 DeepSeek Key：只在服务端读，绝不提交
+# （静态路由已拦截点开头的路径，/data/.freekey 访问不到）
+data/.freekey
+
+# 免费额度的计数落盘：运行时产物，各部署各自一份
+data/.quota.json
