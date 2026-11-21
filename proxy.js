@@ -133,27 +133,33 @@ function clientIp(req) {
 }
 
 /**
- * 按 IP 分桶；拿不到 IP 时退化成浏览器随机 id（localStorage 里那个）。
- * 后者能被清缓存绕过，但它只是兜底——正常部署下反代一定给 IP。
+ * 一次请求同时落在两个桶上：IP 和浏览器匿名 id。
+ * 只按 IP 会被「换网/换代理」绕过，只按 id 会被「清 localStorage」绕过；
+ * 两个都记、按大的那个算，任何一种绕过都还需要另一种也换掉。
  */
-function quotaKey(req) {
+function quotaKeys(req) {
+  const keys = [];
   const ip = clientIp(req);
-  if (ip) return 'ip:' + ip;
+  if (ip) keys.push('ip:' + ip);
   const cid = String(req.headers['x-client-id'] || '').trim().slice(0, 64);
-  if (cid) return 'cid:' + cid;
-  return 'sock:' + ((req.socket && req.socket.remoteAddress) || 'unknown');
+  if (cid) keys.push('cid:' + cid);
+  if (!keys.length) keys.push('sock:' + ((req.socket && req.socket.remoteAddress) || 'unknown'));
+  return keys;
 }
 
 function quotaUsed(req) {
   rollQuota();
-  return quota.buckets.get(quotaKey(req)) || 0;
+  let n = 0;
+  for (const k of quotaKeys(req)) n = Math.max(n, quota.buckets.get(k) || 0);
+  return n;
 }
 
 /** 只在真正调通上游之后才计数，避免失败的请求白吃额度 */
 function quotaTake(req) {
   rollQuota();
-  const k = quotaKey(req);
-  quota.buckets.set(k, (quota.buckets.get(k) || 0) + 1);
+  for (const k of quotaKeys(req)) {
+    quota.buckets.set(k, (quota.buckets.get(k) || 0) + 1);
+  }
   quota.total += 1;
   saveQuota();
 }

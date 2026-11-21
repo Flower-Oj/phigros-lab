@@ -21,11 +21,11 @@
 
 ### 免费 AI 额度（每个 IP 每天 3 次）
 
-在线版不填 API Key 也能生成分析，额度按 IP 每天 3 次，第四次会被拦下来并提示填自己的 Key。
+在线版不填 API Key 也能生成分析，额度每天 3 次，第四次会被拦下来并提示填自己的 Key。
 
 实现要点：**免费 Key 只存在服务端**，浏览器永远拿不到它。
 
-- Key 的读法：环境变量 `FREE_KEY`，没有就读 `data/.freekey`（单行，已 gitignore）
+- Key 的读法：优先 `data/.freekey`（单行，已 gitignore），没有才读环境变量 `FREE_KEY`
 - 额度参数：`FREE_PER_IP`（默认 3）、`FREE_GLOBAL`（全局每日上限，默认 200）
 - 计数只在真正调通上游（HTTP 200）之后才加，失败的请求不白吃额度
 - 计数落盘在 `data/.quota.json`，进程重启不清零，跨天自动重置
@@ -40,8 +40,13 @@ FREE_PER_IP=3 FREE_GLOBAL=200 node proxy.js
 
 不想开就不放这个文件，`/api/ai` 会直接回 503 并让用户填自己的 Key。
 
-> 注意：额度按 IP 计，取 `X-Real-IP` 或 `X-Forwarded-For` 的**最右一跳**（最左边是客户端自己塞的，不可信）。
+> 额度同时记在**两个桶**上：客户端 IP 和浏览器的匿名 id（`localStorage` 里的 `pglab_cid`），按用得多的那个算。
+> 只按 IP 会被「换网/换代理」绕过，只按 id 会被「清缓存」绕过，两个都记才需要两样一起换。
+> IP 取 `X-Real-IP` 或 `X-Forwarded-For` 的**最右一跳**（最左边是客户端自己塞的，不可信）。
 > 反代既不给 IP 也不给 `X-Client-Id` 时退化成 socket 地址，这时同机房用户可能共用一个桶。
+>
+> 另外，托管平台会往每个请求注入它自己的 `Authorization`，所以**用户自己的 Key 一律走 `X-User-Key`**，
+> 不能拿 `Authorization` 判断「用户带没带 Key」——否则免费额度永远不生效，上游还会按注入的 Key 报 401。
 
 
 ---
