@@ -12,7 +12,7 @@ const {
   analysis, ratings, diffCounts, pushRows, planFor, ceiling, norm,
   loadLibrary, coverage, composerOf, diagItems, saveLS, loadLS,
   importText, exportJSON, pushSnapshot, snapshotDiff, simulate, buildPrompt, offlineReport, PRESETS, clientId,
-  rksOf,
+  rksOf, shareBase,
   chartOf
 } = PL;
 
@@ -450,8 +450,9 @@ async function ensureShareTable() {
 }
 
 function shareUrl(code, nick) {
-  // 保留 ?sharecode=：线上站点前面那层鉴权认这个参数，丢了链接就是 403
-  return location.origin + location.pathname + location.search + PL.share.buildHash(code, nick);
+  // shareBase() 在 APK / 本地服务下会换成公网地址：页面自己跑在 127.0.0.1，
+  // 照 location 拼出来的链接别人打不开。公网基址带着 ?sharecode=，那是站点前置鉴权。
+  return shareBase() + PL.share.buildHash(code, nick);
 }
 
 function tryQr(u) {

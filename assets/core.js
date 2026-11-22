@@ -304,6 +304,19 @@ function ceiling(level) {
 /* ---------------- 版本 ---------------- */
 const VERSION = '2.3.0';
 
+/**
+ * 分享链接用的公网基址。
+ * APK 里的页面跑在 127.0.0.1:<本地端口>，直接拿 location 拼出来的链接只有自己这台手机
+ * 打得开；本地 node proxy.js 也一样。所以只要来源是本机地址，一律换成线上地址。
+ * sharecode 是那个站的前置鉴权参数，少了它打开就是 403。
+ */
+const SHARE_BASE = 'https://phigros-lab.app.workbuddy.host/?sharecode=MKTEW4KJWC';
+function shareBase() {
+  const h = location.hostname;
+  const local = location.protocol === 'file:' || h === '127.0.0.1' || h === 'localhost' || h === '0.0.0.0';
+  return local ? SHARE_BASE : location.origin + location.pathname + location.search;
+}
+
 /* ---------------- 曲库 ---------------- */
 const VARIANTS = { '红': '紅', '万': '萬', '龙': '龍', '灵': '靈', '梦': '夢', '乐': '樂', '华': '華', '会': '會', '战': '戰', '亚': '亞', '与': '與' };
 function norm(s) {
@@ -1005,7 +1018,7 @@ function offlineReport() {
 /* ---------------- 导出命名空间 ---------------- */
 Object.assign(PL, {
   $, $$, esc, clamp, sum, mean, isNum, r2, r3, r4, signed, timeAgo, dateStr,
-  RANKS, rksOf, accFor, norm, DEMO, S, K,
+  RANKS, rksOf, accFor, norm, DEMO, S, K, shareBase,
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, resolveId, composerOf, chartOf, diagItems,
   importText, parseLines, exportJSON, pushSnapshot, snapshotDiff, simulate,
