@@ -38,6 +38,8 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.apk': 'application/vnd.android.package-archive',
+  '.txt': 'text/plain; charset=utf-8',
   '.ico': 'image/x-icon'
 };
 
@@ -57,6 +59,54 @@ function allowStatic(rel) {
 }
 
 const staticCache = new Map();   // rel -> { raw, gz, type, etag }
+
+/* ---------- 版本信息 ----------
+   安卓端启动时拉这个接口判断要不要提示更新。
+   版本号直接从 download/ 里的 APK 文件名推导，放新包进去就自动生效，不用两处同步。 */
+const DOWNLOAD_DIR = path.join(__dirname, 'download');
+const PKG_VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || ''; }
+  catch (e) { return ''; }
+})();
+
+const parseVer = v => {
+  const p = String(v || '').split('.');
+  if (!p.length || p.length > 4) return null;
+  const out = [0, 0, 0];
+  for (let i = 0; i < p.length && i < 3; i++) {
+    if (!/^\d+$/.test(p[i])) return null;
+    out[i] = parseInt(p[i], 10);
+  }
+  return out;
+};
+const cmpVer = (a, b) => {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+};
+
+function latestApk() {
+  let files = [];
+  try { files = fs.readdirSync(DOWNLOAD_DIR); } catch (e) { return null; }
+  let best = null;
+  for (const f of files) {
+    const m = /^phigros-lab-(\d+(?:\.\d+){0,3})\.apk$/i.exec(f);
+    if (!m) continue;
+    const v = parseVer(m[1]);
+    if (!v) continue;
+    if (!best || cmpVer(v, best.v) > 0) {
+      let size = 0;
+      try { size = fs.statSync(path.join(DOWNLOAD_DIR, f)).size; } catch (e) {}
+      best = { v, version: m[1], file: f, size };
+    }
+  }
+  return best;
+}
+
+function whatsNew() {
+  try {
+    return fs.readFileSync(path.join(DOWNLOAD_DIR, 'whatsnew.txt'), 'utf8').trim().slice(0, 300);
+  } catch (e) { return ''; }
+}
 
 function staticEntry(rel) {
   const file = path.join(ROOT, rel.replace(/^[\\/]+/, ''));
@@ -732,6 +782,24 @@ async function handle(req, res) {
       free: !!FREE_KEY, perIp: FREE_PER_IP, used,
       left: FREE_KEY ? Math.max(0, FREE_PER_IP - used) : 0
     });
+  }
+
+  // 版本信息：安卓端启动时拉这个判断要不要提示更新
+  if (url.pathname === '/api/version') {
+    const apk = latestApk();
+    const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const rel = apk ? '/download/' + encodeURIComponent(apk.file) : '';
+    const android = apk ? {
+      version: apk.version,
+      code: apk.v[0] * 10000 + apk.v[1] * 100 + apk.v[2],
+      url: host ? proto + '://' + host + rel : rel,
+      size: apk.size,
+      notes: whatsNew()
+    } : null;
+    cors(res);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ web: PKG_VERSION, android }));
   }
 
   if (url.pathname === '/api/ai' && req.method === 'POST') {

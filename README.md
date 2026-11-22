@@ -13,7 +13,7 @@
 **https://phigros-lab.app.workbuddy.host/?sharecode=MKTEW4KJWC**
 短链接（推荐分享用）：**https://tinyurl.com/phigroslab**
 
-安卓安装包见 **Releases** 页面的 `phigros-lab-2.1.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套后端，装完即可离线解析存档。**注意 APK 是 2.1.0 的构建，网页版已更新到 2.2.x，新功能（曲绘分享图、扫码登录）以网页版为准。**
+安卓安装包见 **Releases** 页面的 `phigros-lab-2.2.3.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套前端，装完即可离线解析存档。**App 启动时会查一次 `/api/version`，发现新版本直接弹窗提示下载**（同一个签名密钥，覆盖安装即可升级，数据不丢）。
 
 > APK 完全跑在手机上，没有服务端的免费额度，AI 教练需要自己在右上角填 DeepSeek API Key。
 
@@ -259,6 +259,7 @@ HTTP 接口（`proxy.js` 启动后）。除 `login` 外，所有需要 token 的
 | `GET /api/phi/login` · `poll` | 扫码登录（发起侧限流：每 IP 10 分钟 10 次） |
 | `POST /api/ai` | DeepSeek 转发（绕开 CORS）；不带自己的 Key 时强制 `deepseek-chat` + `max_tokens ≤ 1200` |
 | `GET /api/cloud/*` | LeanCloud 转发 |
+| `GET /api/version` | 版本信息（安卓端启动时查更新；版本号自动取自 `download/*.apk` 文件名，`download/whatsnew.txt` 作为更新说明） |
 
 `/api/ai` 和 `/api/cloud` 只接受同源请求（比对 `Origin` 与 `Host` / `X-Forwarded-Host`），防止别的网站借访客浏览器消耗本站的免费 Key。
 
