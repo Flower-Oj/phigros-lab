@@ -70,25 +70,11 @@ const PKG_VERSION = (() => {
 })();
 
 /* 公网基址。平台的反向代理会把 Host 和 X-Forwarded-Host 都改写成沙箱内网域名
-   （3000-xxxx.e2b.….cloudstudio.club），跟着它们拼出来的下载地址在手机上打不开，
-   所以按这个顺序取域名：
-     1) 调用方自己带的 Origin / Referer —— 浏览器过来的那个一定是公网域名；
-     2) PUBLIC_BASE 环境变量（换域名/自建部署时用）；
-     3) 兜底写死的本应用域名。
-   安卓端用 wx.request / Httpc 拉接口，不带 Origin，走的是 2 或 3。 */
+   （3000-xxxx.e2b.….cloudstudio.club），跟着它们拼出来的地址在手机上打不开，
+   所以这里写死一个，换域名/自建部署时用 PUBLIC_BASE 覆盖。
+   顺带：同源校验（originOk）也拿它当唯一可信的自家域名。 */
 const PUBLIC_BASE = String(process.env.PUBLIC_BASE || 'https://phigros-lab.app.workbuddy.host').replace(/\/+$/, '');
 const PUBLIC_SHARE = process.env.PUBLIC_SHARE || 'MKTEW4KJWC';
-
-function publicBase(req) {
-  const from = req.headers.origin || req.headers.referer || '';
-  if (from && from !== 'null') {
-    try {
-      const u = new URL(from);
-      if (u.protocol === 'http:' || u.protocol === 'https:') return u.protocol + '//' + u.host;
-    } catch (e) {}
-  }
-  return PUBLIC_BASE;
-}
 
 const parseVer = v => {
   const p = String(v || '').split('.');
@@ -187,31 +173,29 @@ const isLocalHost = h => /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$/i
  * 只放行「同源」和「本地 file:// 调试」。
  * 这两个接口会花站点的免费 Key / 拿着访客的 sessionToken 去查数据，
  * 不能让任意网站从访客浏览器里替我们调用。
- * 非浏览器客户端（curl、小程序 wx.request）不发 Origin，直接放行。
+ * 非浏览器客户端（curl、小程序 wx.request、安卓 WebView 之外的请求）不发 Origin，直接放行。
  *
- * 同源判断要同时看 Host 和 X-Forwarded-Host：托管平台若改写了 Host，
- * 只比 Host 会把自家页面判成跨站，等于把功能打死。
+ * 同源判断**不能**靠 Host / X-Forwarded-Host：托管平台会把这两个头都改写成沙箱内网域名
+ * （3000-xxx.e2b.….cloudstudio.club），而浏览器发来的 Origin 是公网域名，两边永远不等，
+ * 结果就是自家页面的 POST /api/ai 被判成跨站，免费 AI 直接 100% 不可用。
+ * 现在只认三样：
+ *   1) 写死的公网域名（PUBLIC_BASE）；
+ *   2) 浏览器自己加、页面 JS 改不了的 Sec-Fetch-Site: same-origin；
+ *   3) 本地开发时的 127.0.0.1 / localhost。
  * 确实需要放开时用 ALLOW_ANY_ORIGIN=1。
  */
 function originOk(req) {
   const o = req.headers.origin;
   if (!o) return true;
   if (process.env.ALLOW_ANY_ORIGIN === '1') return true;
-  if (o === 'null') return isLocalHost(req.headers.host);
+  if (o === 'null') return isLocalHost(req.headers.host);   // file:// 调试
 
   let host;
   try { host = new URL(o).host; } catch (e) { return false; }
 
-  const candidates = [req.headers.host, req.headers['x-forwarded-host'], req.headers['x-original-host']]
-    .filter(Boolean)
-    .map(h => String(h).split(',')[0].trim());
-  if (candidates.indexOf(host) > -1) return true;
-
-  // 兜底：Referer 与 Origin 同主机也算同源
-  const ref = req.headers.referer;
-  if (ref) {
-    try { if (new URL(ref).host === host) return true; } catch (e) {}
-  }
+  try { if (host === new URL(PUBLIC_BASE).host) return true; } catch (e) {}
+  if (isLocalHost(host)) return true;
+  if (String(req.headers['sec-fetch-site'] || '').toLowerCase() === 'same-origin') return true;
   return false;
 }
 
@@ -344,22 +328,51 @@ function quotaTake(req) {
   saveQuota();
 }
 
+/**
+ * 读请求体，超限抛一个带 status=413 的错误。
+ * 超限后不要 req.destroy()：那样客户端只会看到连接被重置（Chrome 里甚至先收到 100 Continue），
+ * 拿不到我们的响应，日志里也全是 ECONNRESET。现在改成「停止收集 + 把剩余字节丢掉」，
+ * 让上层把 413 正常发出去，再靠 Connection: close 收尾。
+ */
 function readBody(req, limit = 32 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let done = false;
+
+    const fail = () => {
+      if (done) return;
+      done = true;
+      const e = new Error('请求体过大');
+      e.status = 413;
+      reject(e);
+      // 剩下的字节照样流走，只是不再进内存
+      req.removeAllListeners('data');
+      req.on('data', () => {});
+      req.resume();
+    };
+
     req.on('data', c => {
+      if (done) return;
       size += c.length;
-      if (size > limit) {
-        reject(new Error('请求体过大'));
-        req.destroy();
-        return;
-      }
+      if (size > limit) return fail();
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks)); } });
+    req.on('error', e => { if (!done) { done = true; reject(e); } });
   });
+}
+
+/** readBody 的收尾：超限回 413，其它错误回 400，别都塞成 400。 */
+function sendBodyError(res, e) {
+  if (e && e.status === 413) {
+    res.writeHead(413, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Connection': 'close'
+    });
+    return res.end('413 请求体过大');
+  }
+  return sendJson(res, 400, { error: (e && e.message) || '请求异常' });
 }
 
 // ---------- DeepSeek 转发（流式） ----------
@@ -776,6 +789,7 @@ async function handleParseUpload(req, res) {
     if (!entries.length) throw new Error('存档里没有可识别的成绩');
     return reply(200, buildPayload({ player: null, summary: null }, entries, 30, true));
   } catch (e) {
+    if (e && e.status === 413) return sendBodyError(res, e);
     return reply(400, { error: e.message || String(e) });
   }
 }
@@ -816,7 +830,7 @@ async function handle(req, res) {
     const android = apk ? {
       version: apk.version,
       code: apk.v[0] * 10000 + apk.v[1] * 100 + apk.v[2],
-      url: publicBase(req) + rel + qs,
+      url: PUBLIC_BASE + rel + qs,
       size: apk.size,
       notes: whatsNew()
     } : null;
@@ -831,8 +845,7 @@ async function handle(req, res) {
       const body = await readBody(req);
       return proxyAI(req, res, body);
     } catch (e) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: e.message }));
+      return sendBodyError(res, e);
     }
   }
 
@@ -884,7 +897,27 @@ async function handle(req, res) {
     return res.end('400 bad path');
   }
   rel = rel.replace(/\\/g, '/');
-  if (rel === '/' || rel === '') rel = '/index.html';
+
+  /* 先把 `.` / `..` / 重复斜杠归一化，再进白名单。
+     顺序反过来的话 /assets/../proxy.js 会先过白名单（它确实以 /assets/ 开头），
+     只靠后面那条「点开头的路径段一律 404」兜住 —— 两层防护不该依赖对方的实现细节。 */
+  const segs = [];
+  let escaped = false;
+  for (const seg of rel.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (!segs.length) { escaped = true; break; }   // 试图跳出站点根目录
+      segs.pop();
+      continue;
+    }
+    segs.push(seg);
+  }
+  // 归一化之后还想跳出根目录的（/../../etc/passwd），直接拒
+  if (escaped) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('404');
+  }
+  rel = !segs.length ? '/index.html' : '/' + segs.join('/');
 
   // 任何以 . 开头的路径段都不给访问：data/.freekey 里的免费 Key、.git、.session 全在这儿
   if (/(^|\/)\./.test(rel)) {

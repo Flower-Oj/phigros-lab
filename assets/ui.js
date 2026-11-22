@@ -730,6 +730,11 @@ async function callAI(messages, onDelta, model, signal) {
       res = await fn();
       if (res.ok) break;
       if (res.status === 401) throw new Error(t('ai.err401'));
+      // 403 是本站自己的跨站保护拦的（不是上游），得翻译成人话，不然只会显示「HTTP 403」
+      if (res.status === 403) {
+        try { const j = await res.json(); if (j && j.error) console.warn('[ai] 403:', j.error); } catch (e) {}
+        throw new Error(t('ai.err403'));
+      }
       if (res.status === 402 || res.status === 429 || res.status === 503) {
         // 后端会给出人话（免费额度用完 / 没配 Key / 免费 Key 失效），优先用它
         let detail = '', code = '';

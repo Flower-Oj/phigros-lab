@@ -371,6 +371,7 @@ const D = {
   'ai.corsTail': [' 再从 http://localhost:8787 打开本页。也可以直接用「离线生成报告」。', ' then reopen this page at http://localhost:8787. You can also use "Offline report".'],
   'ai.err401': ['Key 无效或已失效', 'Invalid or expired API key'],
   'ai.err429': ['账户余额不足或限流（HTTP {c}）', 'Out of balance or rate-limited (HTTP {c})'],
+  'ai.err403': ['本站 AI 接口拒绝了这次请求（可能被跨站保护拦下），点右上角钥匙填自己的 Key 即可继续', 'The site AI endpoint rejected this request (cross-site protection). Add your own key via the top-right key button to continue'],
   'ai.errReq': ['请求失败', 'Request failed'],
   'ai.freeQuota': ['免费额度今天还剩 {n} 次', 'Free quota: {n} left today'],
   'ai.freeNone': ['今天的免费额度用完了，点右上角钥匙填自己的 Key', "Today's free quota is used up — add your own key via the key button at top right"],

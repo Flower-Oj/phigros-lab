@@ -261,7 +261,9 @@ HTTP 接口（`proxy.js` 启动后）。除 `login` 外，所有需要 token 的
 | `GET /api/cloud/*` | LeanCloud 转发 |
 | `GET /api/version` | 版本信息（安卓端启动时查更新；版本号自动取自 `download/*.apk` 文件名，`download/whatsnew.txt` 作为更新说明） |
 
-`/api/ai` 和 `/api/cloud` 只接受同源请求（比对 `Origin` 与 `Host` / `X-Forwarded-Host`），防止别的网站借访客浏览器消耗本站的免费 Key。
+`/api/ai` 和 `/api/cloud` 只接受同源请求，防止别的网站借访客浏览器消耗本站的免费 Key。判定不依赖 `Host` / `X-Forwarded-Host`——托管平台会把这两个头改写成内网域名，跟着它们比会把自家页面判成跨站（浏览器对同源 POST 也一定带 `Origin`）。现在只认三样：`PUBLIC_BASE` 里写死的公网域名、浏览器自带且页面 JS 改不了的 `Sec-Fetch-Site: same-origin`、以及本地调试用的 `127.0.0.1`。不带 `Origin` 的非浏览器客户端（curl、小程序 `wx.request`）直接放行。
+
+请求体超限回 `413` 并 `Connection: close`（不再是掐连接）；非法 URL 编码回 `400` 而不是让进程崩掉；存档解压上限 64MB，防 zip 炸弹。
 
 API Key、成绩和快照只写进浏览器 localStorage；`.save` 上传给本地服务解析，不落盘。
 
