@@ -13,7 +13,7 @@
 **https://phigros-lab.app.workbuddy.host/?sharecode=MKTEW4KJWC**
 短链接（推荐分享用）：**https://tinyurl.com/phigroslab**
 
-安卓安装包见 **Releases** 页面的 `phigros-lab-2.2.3.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套前端，装完即可离线解析存档。**App 启动时会查一次 `/api/version`，发现新版本直接弹窗提示下载**（同一个签名密钥，覆盖安装即可升级，数据不丢）。
+安卓安装包见 **Releases** 页面的 `phigros-lab-2.3.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套前端，装完即可离线解析存档。**App 启动时会查一次 `/api/version`，发现新版本直接弹窗提示下载**（同一个签名密钥，覆盖安装即可升级，数据不丢）。
 
 > APK 完全跑在手机上，没有服务端的免费额度，AI 教练需要自己在右上角填 DeepSeek API Key。
 
