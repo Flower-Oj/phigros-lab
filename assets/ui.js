@@ -946,7 +946,9 @@ async function pullToken(tk) {
   m.className = 'msg';
   m.textContent = t('msg.pulling');
   try {
-    const r = await fetch('/api/phi/all?tk=' + encodeURIComponent(tk));
+    // token 走请求头：query string 会被反代/CDN 的访问日志整行记下来
+    // lean=1：不回 b30（它就是 all 的前 30 条）
+    const r = await fetch('/api/phi/all?lean=1', { headers: { 'X-Session-Token': tk } });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     applyPayload(j, 'cloud');
@@ -978,7 +980,7 @@ async function bind() {
   if (!tk) { m.textContent = t('msg.needToken'); m.className = 'msg err'; return; }
   m.textContent = t('msg.connecting');
   try {
-    const r = await fetch('/api/cloud/users/me?tk=' + encodeURIComponent(tk));
+    const r = await fetch('/api/cloud/users/me', { headers: { 'X-Session-Token': tk } });
     const j = await r.json();
     if (!r.ok) throw new Error((j && (j.error || j.message)) || ('HTTP ' + r.status));
     const who = j.nickname || j.username || j.objectId || t('msg.unknownAcct');

@@ -6,6 +6,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT || 8787);
 // 托管到公网时平台会注入 PORT，此时必须监听 0.0.0.0 才能被反代到；
@@ -40,10 +41,107 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
+/* ---------- 静态资源 ----------
+   首屏约 400KB（JS/CSS 338KB + 两个 csv 64KB），手机流量下不压缩、不缓存很难受。
+   这里改成：启动后按需读入内存、预压缩 gzip、带 ETag 走 304。
+   文件改动（mtime/size 变化）时自动重建，本地改代码不用重启。 */
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript)|image\/svg)/;
+
+/* 只放行前端真正需要的路径。后端源码（proxy.js、lib/）不该能从公网下载。 */
+function allowStatic(rel) {
+  if (rel === '/index.html') return true;
+  if (rel.startsWith('/assets/')) return true;
+  if (/^\/data\/[\w.-]+\.(csv|json)$/.test(rel)) return true;
+  if (/^\/download\/[\w.-]+\.apk$/.test(rel)) return true;
+  return false;
+}
+
+const staticCache = new Map();   // rel -> { raw, gz, type, etag }
+
+function staticEntry(rel) {
+  const file = path.join(ROOT, rel.replace(/^[\\/]+/, ''));
+  let st;
+  try { st = fs.statSync(file); } catch (e) { return null; }
+  if (!st.isFile()) return null;
+
+  const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
+  const hit = staticCache.get(rel);
+  if (hit && hit.etag === etag) return hit;
+
+  const raw = fs.readFileSync(file);
+  const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+  const entry = {
+    raw,
+    gz: COMPRESSIBLE.test(type) && raw.length > 1024 ? zlib.gzipSync(raw, { level: 6 }) : null,
+    type,
+    etag
+  };
+  staticCache.set(rel, entry);
+  return entry;
+}
+
+function serveStatic(req, res, rel) {
+  const e = staticEntry(rel);
+  if (!e) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('404');
+  }
+
+  const h = { 'Cache-Control': 'no-cache', 'ETag': e.etag, 'Vary': 'Accept-Encoding' };
+  const inm = String(req.headers['if-none-match'] || '');
+  if (inm && inm.split(',').some(s => s.trim() === e.etag)) {
+    res.writeHead(304, h);
+    return res.end();
+  }
+
+  const useGz = !!e.gz && /gzip/i.test(String(req.headers['accept-encoding'] || ''));
+  const body = useGz ? e.gz : e.raw;
+  if (useGz) h['Content-Encoding'] = 'gzip';
+  h['Content-Type'] = e.type;
+  h['Content-Length'] = body.length;
+  res.writeHead(200, h);
+  if (req.method === 'HEAD') return res.end();
+  res.end(body);
+}
+
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-User-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-User-Key, X-Session-Token');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+}
+
+const isLocalHost = h => /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$/i.test(String(h || ''));
+
+/**
+ * 只放行「同源」和「本地 file:// 调试」。
+ * 这两个接口会花站点的免费 Key / 拿着访客的 sessionToken 去查数据，
+ * 不能让任意网站从访客浏览器里替我们调用。
+ * 非浏览器客户端（curl、小程序 wx.request）不发 Origin，直接放行。
+ *
+ * 同源判断要同时看 Host 和 X-Forwarded-Host：托管平台若改写了 Host，
+ * 只比 Host 会把自家页面判成跨站，等于把功能打死。
+ * 确实需要放开时用 ALLOW_ANY_ORIGIN=1。
+ */
+function originOk(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  if (process.env.ALLOW_ANY_ORIGIN === '1') return true;
+  if (o === 'null') return isLocalHost(req.headers.host);
+
+  let host;
+  try { host = new URL(o).host; } catch (e) { return false; }
+
+  const candidates = [req.headers.host, req.headers['x-forwarded-host'], req.headers['x-original-host']]
+    .filter(Boolean)
+    .map(h => String(h).split(',')[0].trim());
+  if (candidates.indexOf(host) > -1) return true;
+
+  // 兜底：Referer 与 Origin 同主机也算同源
+  const ref = req.headers.referer;
+  if (ref) {
+    try { if (new URL(ref).host === host) return true; } catch (e) {}
+  }
+  return false;
 }
 
 // ---------- 免费额度 ----------
@@ -51,6 +149,7 @@ function cors(res) {
 // 前端只会请求 /api/ai，拿不到 Key，也就不可能被扒走。
 const FREE_PER_IP = Math.max(0, Number(process.env.FREE_PER_IP || 3));
 const FREE_GLOBAL = Math.max(1, Number(process.env.FREE_GLOBAL || 200));
+const FREE_MAX_TOKENS = Math.max(128, Number(process.env.FREE_MAX_TOKENS || 1200));
 
 function readFreeKey() {
   try {
@@ -121,16 +220,25 @@ function rollQuota() {
 
 /**
  * 真实客户端 IP。
- * 取最右一跳：代理追加的那一项才是真实对端，客户端自己塞的伪造值在最左边——
- * 取最左等于把额度交给攻击者自己说了算。
+ * X-Real-IP / X-Forwarded-For 都是请求头，客户端可以自己伪造。
+ * 这里只做「格式可信」的过滤：不是合法 IP 就当没有，避免额度键被写成任意字符串
+ * （每个伪造值一个新桶 = 免费额度无限）。
+ * 注意：若托管平台不覆盖这两个头，伪造仍可能绕过单 IP 桶，
+ * 真正的兜底是 FREE_GLOBAL 全局上限 + 下面免费档的参数收敛。
  */
+const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]{2,45}$/i;
+
 function clientIp(req) {
   const real = String(req.headers['x-real-ip'] || '').trim();
-  if (real) return real;
+  if (real && IP_RE.test(real)) return real;
   const xf = String(req.headers['x-forwarded-for'] || '')
     .split(',').map(s => s.trim()).filter(Boolean);
-  if (xf.length) return xf[xf.length - 1];
-  return '';
+  if (xf.length) {
+    const last = xf[xf.length - 1];
+    if (IP_RE.test(last)) return last;
+  }
+  const sock = (req.socket && req.socket.remoteAddress) || '';
+  return sock ? sock.replace(/^::ffff:/, '') : '';
 }
 
 /**
@@ -193,7 +301,6 @@ function proxyAI(req, res, body) {
   } catch (e) {
     return sendJson(res, 400, { error: '请求体不是合法 JSON' });
   }
-  const payload = JSON.stringify({ ...parsed, stream: true });
 
   // 只认 X-User-Key：托管平台会往每个请求里注入它自己的 Authorization，
   // 拿 Authorization 判断「用户带没带 Key」会被那条注入的头骗过去——
@@ -201,6 +308,16 @@ function proxyAI(req, res, body) {
   const userKey = String(req.headers['x-user-key'] || '').trim();
   const own = userKey ? 'Bearer ' + userKey : '';
   const useFree = !own;
+
+  /* 免费档必须收敛参数：否则一个人可以指着 deepseek-reasoner + 十万 token 打，
+     一次就把整天的成本吃掉。用自己的 Key 时不做任何干预。 */
+  const out = { ...parsed, stream: true };
+  if (useFree) {
+    out.model = 'deepseek-chat';
+    const asked = Number(out.max_tokens);
+    out.max_tokens = Math.min(Number.isFinite(asked) && asked > 0 ? asked : FREE_MAX_TOKENS, FREE_MAX_TOKENS);
+  }
+  const payload = JSON.stringify(out);
 
   if (useFree) {
     rollQuota();
@@ -260,8 +377,14 @@ function proxyAI(req, res, body) {
 }
 
 // ---------- 云存档转发 ----------
+// token 优先从请求头取：query string 会被反代/CDN 的访问日志整行记录下来
+function sessionToken(req, url) {
+  const h = String(req.headers['x-session-token'] || '').trim();
+  return h || String(url.searchParams.get('tk') || '').trim();
+}
+
 function proxyCloud(req, res, url) {
-  const tk = url.searchParams.get('tk') || '';
+  const tk = sessionToken(req, url);
   const sub = url.pathname.replace(/^\/api\/cloud/, '') || '/users/me';
   const qs = new URLSearchParams(url.searchParams);
   qs.delete('tk');
@@ -431,7 +554,34 @@ async function handleJacket(req, res, url) {
   }
 }
 
-async function handleLoginStart(res, url) {
+/* 登录发起限流：每次调用都会打 TapTap 的授权接口，
+   公开实例不限流就会被当成免费跳板刷。每 IP 10 分钟 10 次。 */
+const LOGIN_WINDOW = 10 * 60 * 1000;
+const LOGIN_MAX = 10;
+const loginHits = new Map();
+
+function loginAllowed(req) {
+  const ip = clientIp(req) || 'unknown';
+  const now = Date.now();
+  const arr = (loginHits.get(ip) || []).filter(t => now - t < LOGIN_WINDOW);
+  if (arr.length >= LOGIN_MAX) {
+    loginHits.set(ip, arr);
+    return false;
+  }
+  arr.push(now);
+  loginHits.set(ip, arr);
+  if (loginHits.size > 5000) {
+    for (const [k, v] of loginHits) {
+      if (!v.length || now - v[v.length - 1] > LOGIN_WINDOW) loginHits.delete(k);
+    }
+  }
+  return true;
+}
+
+async function handleLoginStart(req, res, url) {
+  if (!loginAllowed(req)) {
+    return sendJson(res, 429, { error: '登录请求太频繁，过几分钟再试' });
+  }
   const server = url.searchParams.get('server') === 'global' ? 'global' : 'cn';
   const code = await taptapLib.requestCode(server);
   const id = crypto.randomUUID();
@@ -473,11 +623,12 @@ function mapEntry(e) {
  * 统一响应：b30 是前 30，all 是全部记录。
  * 存档里没有逐曲时间戳，「最近 3 次游玩」无法还原，只回传合计值 sum3，
  * 前端用 official × 30 − sum27 精确反解。
+ * lean=1 时不回 b30：它就是 all 的前 30 条，白传一遍（817 条时响应几乎翻倍）。
  */
-function buildPayload(data, entries, n) {
+function buildPayload(data, entries, n, lean) {
   const b = rksLib.computeB30(entries, data.summary ? data.summary.rankingScore : null);
   const st = rksLib.stats(entries);
-  return {
+  const out = {
     player: data.player && (data.player.nickname || data.player.username),
     summary: data.summary,
     stats: st,
@@ -485,15 +636,17 @@ function buildPayload(data, entries, n) {
     songs: infoLib.total(),
     recent3: [],
     recent3Sum: b.sum3 == null ? null : Number(b.sum3.toFixed(3)),
-    b30: entries.slice(0, n).map(mapEntry),
     all: entries.map(mapEntry)
   };
+  if (!lean) out.b30 = entries.slice(0, n).map(mapEntry);
+  return out;
 }
 
 async function handlePhi(req, res, url) {
-  const tk = url.searchParams.get('tk') || '';
+  const tk = sessionToken(req, url);
   const server = url.searchParams.get('server') === 'global' ? 'global' : 'cn';
   const n = Math.min(Number(url.searchParams.get('n')) || 30, 100);
+  const lean = url.searchParams.get('lean') === '1';
   const key = server + ':' + tk;
 
   const reply = (code, obj) => {
@@ -515,6 +668,11 @@ async function handlePhi(req, res, url) {
         st: rksLib.stats(entries)
       };
       cache.set(key, hit);
+      // 只增不删会一直吃内存：超过上限就按时间淘汰最旧的一半
+      if (cache.size > 60) {
+        const olds = [...cache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, cache.size - 30);
+        for (const [k] of olds) cache.delete(k);
+      }
     }
     const { data, entries, b, st } = hit;
 
@@ -526,7 +684,7 @@ async function handlePhi(req, res, url) {
         suggest: rksLib.suggest(entries, { cutoff: b.cutoff, limit: 20 }) });
     }
 
-    return reply(200, buildPayload(data, entries, n));
+    return reply(200, buildPayload(data, entries, n, lean));
   } catch (e) {
     return reply(400, { error: e.message || String(e) });
   }
@@ -540,19 +698,25 @@ async function handleParseUpload(req, res) {
     res.end(JSON.stringify(obj));
   };
   try {
-    const body = await readBody(req);
+    const body = await readBody(req, 8 * 1024 * 1024);   // 真实存档 ~1MB，给 8MB 足够
     if (!body.length) throw new Error('没有收到文件内容');
     const parsed = saveLib.parseSave(body);
     const entries = rksLib.enrich(parsed.records);
     if (!entries.length) throw new Error('存档里没有可识别的成绩');
-    return reply(200, buildPayload({ player: null, summary: null }, entries, 30));
+    return reply(200, buildPayload({ player: null, summary: null }, entries, 30, true));
   } catch (e) {
     return reply(400, { error: e.message || String(e) });
   }
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+async function handle(req, res) {
+  let url;
+  try {
+    url = new URL(req.url, 'http://localhost');
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('400');
+  }
 
   if (req.method === 'OPTIONS') {
     cors(res);
@@ -560,17 +724,18 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // 免费额度查询：前端拿来显示「今天还剩几次」，不返回 Key 本身
+  // 免费额度查询：前端拿来显示「今天还剩几次」，不返回 Key 本身，
+  // 也不告诉外人这台机器到底配没配 Key（keySrc 只留在启动日志里）
   if (url.pathname === '/api/ai/quota') {
     const used = quotaUsed(req);
     return sendJson(res, 200, {
       free: !!FREE_KEY, perIp: FREE_PER_IP, used,
-      left: FREE_KEY ? Math.max(0, FREE_PER_IP - used) : 0,
-      keySrc: FREE_KEY_SRC
+      left: FREE_KEY ? Math.max(0, FREE_PER_IP - used) : 0
     });
   }
 
   if (url.pathname === '/api/ai' && req.method === 'POST') {
+    if (!originOk(req)) return sendJson(res, 403, { error: '不允许从其他站点调用' });
     try {
       const body = await readBody(req);
       return proxyAI(req, res, body);
@@ -581,11 +746,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname.startsWith('/api/cloud')) {
+    if (!originOk(req)) return sendJson(res, 403, { error: '不允许从其他站点调用' });
     return proxyCloud(req, res, url);
   }
 
   if (url.pathname === '/api/phi/login') {
-    try { return await handleLoginStart(res, url); }
+    try { return await handleLoginStart(req, res, url); }
     catch (e) { return sendJson(res, 400, { error: e.message || String(e) }); }
   }
 
@@ -617,27 +783,42 @@ const server = http.createServer(async (req, res) => {
   }
 
   // 静态文件
-  let rel = decodeURIComponent(url.pathname);
+  // decodeURIComponent 遇到 %zz 这种非法编码会抛 URIError；在 async 处理器里
+  // 抛出就是 unhandled rejection，Node 15+ 直接杀进程——一个请求就能让整站下线。
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('400 bad path');
+  }
+  rel = rel.replace(/\\/g, '/');
   if (rel === '/' || rel === '') rel = '/index.html';
+
   // 任何以 . 开头的路径段都不给访问：data/.freekey 里的免费 Key、.git、.session 全在这儿
-  if (/(^|[\\/])\./.test(rel)) {
+  if (/(^|\/)\./.test(rel)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('404');
   }
-  const file = path.join(ROOT, path.normalize(rel).replace(/^([\\/])+/, ''));
-  const inRoot = file === ROOT || file.startsWith(ROOT + path.sep);
-  if (!inRoot) {
-    res.writeHead(403);
-    return res.end('forbidden');
+  // 白名单之外一律 404：后端源码（proxy.js / lib / tools）、package.json 不需要被公网下载
+  if (!allowStatic(rel)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('404');
   }
-  fs.readFile(file, (err, data) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('404');
-    }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
-    res.end(data);
-  });
+  return serveStatic(req, res, rel);
+}
+
+const server = http.createServer((req, res) => {
+  // 兜底：任何漏网的 rejection 都只让这一个请求 500，不牵连进程
+  Promise.resolve()
+    .then(() => handle(req, res))
+    .catch(e => {
+      try {
+        if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('500');
+      } catch (_) {}
+      console.error('[handler]', (e && e.stack) || e);
+    });
 });
 
 loadQuota();

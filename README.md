@@ -11,8 +11,9 @@
 不想装 Node 的话，直接打开在线版，后端也跑在云上，云存档拉取、上传 `.save` 解析、AI 教练都能用：
 
 **https://phigros-lab.app.workbuddy.host/?sharecode=MKTEW4KJWC**
+短链接（推荐分享用）：**https://tinyurl.com/phigroslab**
 
-安卓安装包见 **Releases** 页面的 `phigros-lab-2.1.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套后端，装完即可离线解析存档。
+安卓安装包见 **Releases** 页面的 `phigros-lab-2.1.0.apk`（Android 8.0+，自签名，安装时需允许未知来源）。APK 内置了同一套后端，装完即可离线解析存档。**注意 APK 是 2.1.0 的构建，网页版已更新到 2.2.x，新功能（曲绘分享图、扫码登录）以网页版为准。**
 
 > APK 完全跑在手机上，没有服务端的免费额度，AI 教练需要自己在右上角填 DeepSeek API Key。
 
@@ -238,28 +239,32 @@ phigros-lab/
 │  ├─ info.csv       327 首曲目定数表
 │  ├─ charts.csv     谱面统计（BPM / 时长 / 物量 / 章节），谱面预览与诊断用
 │  ├─ jackets.json   曲绘文件名清单（只有名字，没有图片）
-│  └─ sample.save    真实存档，仅用于离线测试解析（可删）
-├─ .gitignore        忽略 data/.session 等凭证文件
+│  └─ jackets/       曲绘缩略图缓存（运行时生成，已 gitignore）
+├─ .gitignore        忽略 data/.session、data/.freekey、data/jackets/ 等
 ├─ package.json      只有 start / cli 两个脚本，无依赖
 └─ README.md
 ```
 
-HTTP 接口（`proxy.js` 启动后）：
+HTTP 接口（`proxy.js` 启动后）。除 `login` 外，所有需要 token 的路由都支持 `X-Session-Token` 请求头，`?tk=` 只是兜底写法：
 
-| 路由                            | 说明                                 |
-| ----------------------------- | ---------------------------------- |
-| `GET /api/phi/b30?tk=&n=30`   | 账号、summary、统计、B30，同时带全部记录 `all`    |
-| `GET /api/phi/all?tk=`        | 同上，取全部成绩                           |
-| `GET /api/phi/rks?tk=`        | 只取 RKS 与统计                         |
-| `GET /api/phi/suggest?tk=`    | 推分建议                               |
-| `POST /api/phi/parse`         | 直接把 `.save` 原始字节 POST 过来，本地解析后返回成绩 |
-| `GET /api/library`            | 曲库与定数表（网页用它算覆盖率）                   |
+| 路由 | 说明 |
+| --- | --- |
+| `GET /api/phi/b30?n=30` · `/all` | 账号、summary、统计与全部记录 `all`；`/b30` 额外带前 30 条 |
+| `GET /api/phi/all?lean=1` | 同上但不回 `b30`（它就是 `all` 的前 30 条，省一半体积） |
+| `GET /api/phi/rks` | 只取 RKS 与统计 |
+| `GET /api/phi/suggest` | 推分建议 |
+| `POST /api/phi/parse` | 直接把 `.save` 原始字节 POST 过来（上限 8MB），本地解析后返回成绩 |
+| `GET /api/library` | 曲库与定数表（网页用它算覆盖率） |
 | `GET /api/jacket/<曲名.曲师>` | 曲绘缩略图（导出分享图用，按需抓取 + 落盘缓存，见 `NOTICE.md`） |
-| `GET /api/phi/login` · `poll` | 扫码登录                               |
-| `POST /api/ai`                | DeepSeek 转发（绕开 CORS）               |
-| `GET /api/cloud/*`            | LeanCloud 转发                       |
+| `GET /api/phi/login` · `poll` | 扫码登录（发起侧限流：每 IP 10 分钟 10 次） |
+| `POST /api/ai` | DeepSeek 转发（绕开 CORS）；不带自己的 Key 时强制 `deepseek-chat` + `max_tokens ≤ 1200` |
+| `GET /api/cloud/*` | LeanCloud 转发 |
+
+`/api/ai` 和 `/api/cloud` 只接受同源请求（比对 `Origin` 与 `Host` / `X-Forwarded-Host`），防止别的网站借访客浏览器消耗本站的免费 Key。
 
 API Key、成绩和快照只写进浏览器 localStorage；`.save` 上传给本地服务解析，不落盘。
+
+静态资源在内存里预压缩并带 `ETag`：首屏 306KB → gzip 后 110KB，二次访问直接 304。静态路由只放行 `index.html`、`assets/`、`data/*.csv|json`、`download/*.apk`，后端源码不会被下载。
 
 ---
 
@@ -267,7 +272,9 @@ API Key、成绩和快照只写进浏览器 localStorage；`.save` 上传给本�
 
 `sessionToken` 是 25 位字母数字，用 Phi-Plugin 等工具扫码登录云存档后可以拿到。它是**临时凭证**，不是账号密码；过期就重新扫一次。
 
-本工具不做账号密码登录、不代管 token、不落盘。
+本工具不做账号密码登录，服务端也不保存 token：token 只在你自己的浏览器里（`localStorage` 的 `pglab_meta`），用来刷新后免重新粘贴，点「清除本地数据」会一并删掉。想让 token 完全不留痕，就每次都手动粘贴、用完点清除。
+
+调用云存档接口时 token 走 `X-Session-Token` 请求头，不再拼进 URL——query string 会被反向代理和 CDN 的访问日志整行记下来。
 
 ---
 
@@ -275,7 +282,7 @@ API Key、成绩和快照只写进浏览器 localStorage；`.save` 上传给本�
 
 定数表与二进制格式的解析逻辑参考了 [phi-plugin](https://github.com/Catrong/phi-plugin)（GPL-3.0），`lib/` 下的代码为独立实现。曲目数据来自其 `resources/info/info.csv`，版权归原项目与 Pigeon Games 所有。
 
-`data/sample.save` 是一份真实玩家的存档，只用于验证解析器（`node phi.js file data/sample.save`）。不想公开自己的成绩就删掉它，解析逻辑本身不依赖这个文件。
+仓库里不再附带真实存档（`data/sample.save` 已移除），需要离线验证解析器就用 `phi.js pull` 拉自己的，或把 `.save` 文件直接传给 `node phi.js file 你的存档.save`。解析逻辑本身不依赖任何样本文件。
 
 本项目与 Pigeon Games 无关，仅供个人成绩分析。请勿用于批量查询或对官方服务器施压。
 
