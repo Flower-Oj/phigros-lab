@@ -69,6 +69,27 @@ const PKG_VERSION = (() => {
   catch (e) { return ''; }
 })();
 
+/* 公网基址。平台的反向代理会把 Host 和 X-Forwarded-Host 都改写成沙箱内网域名
+   （3000-xxxx.e2b.….cloudstudio.club），跟着它们拼出来的下载地址在手机上打不开，
+   所以按这个顺序取域名：
+     1) 调用方自己带的 Origin / Referer —— 浏览器过来的那个一定是公网域名；
+     2) PUBLIC_BASE 环境变量（换域名/自建部署时用）；
+     3) 兜底写死的本应用域名。
+   安卓端用 wx.request / Httpc 拉接口，不带 Origin，走的是 2 或 3。 */
+const PUBLIC_BASE = String(process.env.PUBLIC_BASE || 'https://phigros-lab.app.workbuddy.host').replace(/\/+$/, '');
+const PUBLIC_SHARE = process.env.PUBLIC_SHARE || 'MKTEW4KJWC';
+
+function publicBase(req) {
+  const from = req.headers.origin || req.headers.referer || '';
+  if (from && from !== 'null') {
+    try {
+      const u = new URL(from);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.protocol + '//' + u.host;
+    } catch (e) {}
+  }
+  return PUBLIC_BASE;
+}
+
 const parseVer = v => {
   const p = String(v || '').split('.');
   if (!p.length || p.length > 4) return null;
@@ -787,13 +808,15 @@ async function handle(req, res) {
   // 版本信息：安卓端启动时拉这个判断要不要提示更新
   if (url.pathname === '/api/version') {
     const apk = latestApk();
-    const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
-    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
     const rel = apk ? '/download/' + encodeURIComponent(apk.file) : '';
+    /* 站点前面有一层鉴权，/api/* 和 /download/* 不带 sharecode 会被 403，
+       所以把调用方带来的 sharecode 带到下载链接上，没带就用本应用固定的那个。 */
+    const sc = url.searchParams.get('sharecode') || PUBLIC_SHARE;
+    const qs = '?sharecode=' + encodeURIComponent(sc);
     const android = apk ? {
       version: apk.version,
       code: apk.v[0] * 10000 + apk.v[1] * 100 + apk.v[2],
-      url: host ? proto + '://' + host + rel : rel,
+      url: publicBase(req) + rel + qs,
       size: apk.size,
       notes: whatsNew()
     } : null;
