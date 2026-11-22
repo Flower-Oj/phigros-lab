@@ -492,6 +492,46 @@ textarea{line-height:1.7;font-size:12.5px;font-family:var(--sans)}
   box-shadow:0 0 0 1px var(--line)}
 .qr-img svg{display:block;width:100%;height:100%}
 .qr-hint{font-size:11px;color:var(--text-2)}
+
+/* 推分模拟：拖准度条实时看 RKS */
+.sim-body{display:flex;gap:24px;align-items:flex-start;margin-top:12px;flex-wrap:wrap}
+.sim-left{flex:1 1 330px;min-width:270px}
+.sim-right{flex:1 1 300px;min-width:250px}
+.sim-sel .select{width:100%;margin-top:4px}
+.sim-slider{display:flex;align-items:center;gap:14px;margin:16px 0 10px}
+.sim-slider input[type=range]{flex:1;accent-color:var(--accent);height:4px;cursor:pointer}
+.sim-val{font-family:var(--mono);font-size:19px;color:var(--text);min-width:84px;text-align:right;letter-spacing:-.01em}
+.sim-val span{font-size:11px;color:var(--text-3);margin-left:3px}
+.sim-quick .chip{padding:3px 10px;font-size:11px}
+.sim-assume{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.sim-line{display:flex;align-items:baseline;gap:10px;font-size:12px;padding:5px 0}
+.sim-line .k{font-size:10.5px;color:var(--text-3);width:74px;flex:none}
+.sim-line .v{font-family:var(--mono);font-size:15px;color:var(--text-3)}
+.sim-line i{font-style:normal;color:var(--text-3);opacity:.55}
+.sim-line .nv{font-family:var(--mono);font-size:17px;color:var(--text)}
+.sim-line .d{font-family:var(--mono);font-size:12.5px;margin-left:auto}
+.sim-note{font-size:11px;color:var(--text-3);line-height:1.7;margin-top:8px}
+/* 分享成绩单：生成弹窗 + 只读查看弹窗 */
+.share-grid{display:flex;gap:18px;align-items:flex-start;margin-top:2px}
+.share-qr{flex:none;display:flex;flex-direction:column;align-items:center;gap:8px}
+.share-qr[hidden]{display:none}
+.share-side{flex:1;min-width:0}
+.share-nick{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-2);cursor:pointer;user-select:none}
+.share-nick input{width:13px;height:13px;accent-color:var(--accent);margin:0}
+.shared-head{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:2px 0 10px;
+  padding-bottom:10px;border-bottom:1px solid var(--line)}
+.shared-head .big{font-family:var(--mono);font-size:23px;color:var(--text);letter-spacing:-.02em}
+.shared-head .who{font-size:13px;color:var(--text-2)}
+.shared-head .k{font-size:10.5px;color:var(--text-3)}
+.shared-list{margin-bottom:12px;border-top:1px solid var(--line)}
+.shared-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:12px}
+.shared-row:last-child{border-bottom:0}
+.shared-row .idx{font-family:var(--mono);font-size:10px;color:var(--text-3);width:20px;flex:none;text-align:right}
+.shared-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+.shared-row .rk{font-family:var(--mono);font-size:9.5px;color:var(--text-3);width:22px;flex:none}
+.shared-row .ac{font-family:var(--mono);font-size:11.5px;color:var(--text-3);width:62px;text-align:right;flex:none}
+.shared-row .sr{font-family:var(--mono);font-size:11.5px;color:var(--accent-2);width:46px;text-align:right;flex:none}
+.shared-row .up{color:var(--mint)}
 .drop{
   border:1.5px dashed var(--line-2);border-radius:var(--radius-sm);
   padding:26px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;

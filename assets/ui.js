@@ -9,9 +9,10 @@ const t = (k, v) => (PL.t ? PL.t(k, v) : k);
 
 const {
   $, $$, esc, r2, r3, r4, signed, timeAgo, dateStr, S, K, isNum,
-  analysis, ratings, diffCounts, pushRows, planFor, ceiling,
+  analysis, ratings, diffCounts, pushRows, planFor, ceiling, norm,
   loadLibrary, coverage, composerOf, diagItems, saveLS, loadLS,
-  importText, exportJSON, pushSnapshot, snapshotDiff, buildPrompt, offlineReport, PRESETS, clientId,
+  importText, exportJSON, pushSnapshot, snapshotDiff, simulate, buildPrompt, offlineReport, PRESETS, clientId,
+  rksOf,
   chartOf
 } = PL;
 
@@ -429,6 +430,255 @@ function renderSnapDiff() {
 
   box.innerHTML = head + `<div class="wk-list">${rows}</div>` +
     (d.total > d.items.length ? `<div class="hint">${esc(t('snap.diffMore', { n: d.total - d.items.length }))}</div>` : '');
+}
+
+/* ---------------- 成绩单分享（URL fragment，无后端） ----------------
+   成绩只放在 # 后面：浏览器不会把 fragment 发给服务器，平台访问日志里也没有它。
+   代价是链接长（30 首 ≈ 201 字符，二维码刚好塞进 v10 的上限），所以主入口是二维码。
+   将来要短链/统计，后端只需要存 payload → 短 id 的映射，这里的编解码一行都不用改。 */
+let shareCode = '';
+
+async function ensureShareTable() {
+  if (PL.share.tableReady()) return true;
+  try {
+    const r = await fetch('data/share-songs.json');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return PL.share.setTable(await r.json());
+  } catch (e) {
+    return false;
+  }
+}
+
+function shareUrl(code, nick) {
+  // 保留 ?sharecode=：线上站点前面那层鉴权认这个参数，丢了链接就是 403
+  return location.origin + location.pathname + location.search + PL.share.buildHash(code, nick);
+}
+
+function tryQr(u) {
+  try { return PLQR.encode(u); } catch (e) { return null; }
+}
+
+/* 分享只认曲目 id（链接里存的是索引），但手输导入 / 示例数据只有曲名，
+   所以按曲名反查一次——查不到的就不进链接，宁可少几首也不瞎猜。 */
+function shareEntries() {
+  const out = [];
+  for (const r of analysis().sorted.slice(0, 30)) {
+    let id = r.id;
+    if (!id) {
+      const lib = S.libByName.get(norm(r.n)) || null;
+      id = lib && lib.id;
+    }
+    if (id) out.push({ id, rank: r.d, acc: r.a });
+  }
+  return out;
+}
+
+function paintShare() {
+  const nick = $('#shareNick').checked ? String(S.nick || '').trim() : '';
+  const url = shareUrl(shareCode, nick);
+  $('#shareLink').value = url;
+
+  // 昵称是 URL 编码后的中文，很容易把 v10 的容量顶爆；爆了就退回到不带昵称的那条
+  let qr = tryQr(url), dropped = false;
+  if (!qr && nick) {
+    qr = tryQr(shareUrl(shareCode, ''));
+    dropped = true;
+  }
+  const wrap = $('#shareQrWrap'), box = $('#shareQr');
+  if (qr) {
+    box.innerHTML = PLQR.toSVG(qr, { margin: 2, dark: '#000000', light: '#ffffff' });
+    wrap.hidden = false;
+  } else {
+    box.innerHTML = '';
+    wrap.hidden = true;
+  }
+  $('#shareNote').textContent = !qr ? t('share.qrTooLong')
+    : dropped ? t('share.qrNoNick')
+      : t('share.note', { len: url.length });
+}
+
+async function openShare() {
+  const m = $('#shareMsg');
+  m.className = 'msg';
+  m.textContent = '';
+  if (!S.data.length) { toast(t('share.noData'), 'err'); return; }
+  if (!await ensureShareTable()) { toast(t('share.loadFail'), 'err'); return; }
+  // 只编码 B30 的前 30 首：再往后的进不了综合 RKS，放进去纯属公开隐私
+  let enc;
+  try {
+    enc = PL.share.encode(shareEntries());
+  } catch (e) {
+    toast(e.message || String(e), 'err');
+    return;
+  }
+  if (!enc.count) { toast(t('share.noneShareable'), 'err'); return; }
+  shareCode = enc.code;
+  $('#shareWarn').textContent = t('share.warn', { n: enc.count }) +
+    (enc.skipped ? ' ' + t('share.skipped', { n: enc.skipped }) : '');
+  $('#shareModal').hidden = false;
+  paintShare();
+}
+
+/* 复制到剪贴板：clipboard API 在非 https / 无用户手势时会被拒，退回选中+execCommand */
+async function copyText(v, okMsg) {
+  try {
+    await navigator.clipboard.writeText(v);
+    toast(okMsg);
+    return true;
+  } catch (e) {}
+  const el = $('#shareLink');
+  if (el) {
+    el.value = v;
+    el.select();
+    el.setSelectionRange(0, v.length);
+    try { if (document.execCommand('copy')) { toast(okMsg); return true; } } catch (e) {}
+  }
+  return false;
+}
+
+let sharedItems = [];
+
+async function showShared(spec) {
+  if (!await ensureShareTable()) { toast(t('share.loadFail'), 'err'); return; }
+  await loadLibrary();
+  let rows;
+  try {
+    rows = PL.share.decode(spec.code);
+  } catch (e) {
+    toast(t('shared.bad', { e: e.message }), 'err');
+    return;
+  }
+  sharedItems = rows.map(r => {
+    const lib = S.libById.get(r.id) || null;
+    const c = lib && lib.const ? lib.const[r.rank] : null;
+    return {
+      id: r.id, rank: r.rank, acc: r.acc,
+      name: lib ? lib.song : r.id,
+      c: isNum(c) ? c : null,
+      rk: isNum(c) ? rksOf(c, r.acc) : null
+    };
+  });
+  const rks = sharedItems.filter(x => x.rk != null);
+  const avg = rks.length ? rks.reduce((s, x) => s + x.rk, 0) / rks.length : null;
+
+  $('#sharedTitle').textContent = t('shared.title');
+  $('#sharedSub').textContent = t('shared.sub', { n: sharedItems.length });
+  $('#sharedHead').innerHTML =
+    `<span class="who">${esc(spec.nick || t('shared.anon'))}</span>` +
+    (avg != null ? `<span class="big">${r2(avg)}</span><span class="k">${esc(t('shared.avgRks'))}</span>` : '') +
+    `<span class="k">${esc(t('shared.count', { n: sharedItems.length }))}</span>`;
+
+  $('#sharedList').innerHTML = sharedItems.map((x, i) => `<div class="shared-row">
+      <span class="idx">${i + 1}</span>
+      <span class="nm" title="${esc(x.name)}">${esc(x.name)}</span>
+      <span class="rk">${esc(x.rank)}</span>
+      <span class="ac">${x.acc.toFixed(2)}%</span>
+      <span class="sr">${x.rk != null ? r3(x.rk) : '—'}</span>
+    </div>`).join('');
+
+  $('#sharedMsg').textContent = '';
+  // 对方曲库里有这首、但没这个难度时定数取不到，单曲 RKS 就只能是「—」，平均分也只算能算的
+  const missing = sharedItems.length - rks.length;
+  if (missing > 0) $('#sharedSub').textContent = t('shared.sub', { n: sharedItems.length }) + ' ' + t('shared.partial', { n: missing });
+  $('#sharedModal').hidden = false;
+}
+
+function sharedAsText() {
+  const head = `Phigros Lab · ${$('#sharedHead .who') ? $('#sharedHead .who').textContent : ''}`;
+  const rksEl = $('#sharedHead .big');
+  const lines = sharedItems.map((x, i) =>
+    `${String(i + 1).padStart(2, ' ')}. ${x.name} ${x.rank} ${x.acc.toFixed(2)}%${x.rk != null ? '  ' + r3(x.rk) : ''}`);
+  return [head, rksEl ? 'Top30 平均 RKS ' + rksEl.textContent : '', ...lines].join('\n');
+}
+
+/* ---------------- 推分模拟 ----------------
+   只改副本：sim 只记「当前模拟的那首 + 模拟后的 acc」，
+   真正的 S.data 一个字节都不动，所以「重置」永远回得去。 */
+const sim = { key: '', acc: null };
+
+function simKeyOf(r) { return (r.id || r.n) + '|' + r.d; }
+
+function simIndexMap() {
+  const m = new Map();
+  S.data.forEach((r, i) => { if (r && r.d) m.set(simKeyOf(r), i); });
+  return m;
+}
+
+function simCandidates() {
+  return analysis().sorted.slice(0, 30).map(r => ({
+    key: simKeyOf(r), name: r.n, d: r.d, a: r.a, c: r.c
+  }));
+}
+
+function simBaseAcc() {
+  const idx = simIndexMap().get(sim.key);
+  return idx == null ? 99 : (Number(S.data[idx].a) || 0);
+}
+
+function paintSim() {
+  const sel = $('#simPick');
+  const out = $('#simOut');
+  if (!sel || !out) return;
+  if (!S.data.length) {
+    sel.innerHTML = '';
+    out.innerHTML = `<div class="hint">${esc(t('sim.needData'))}</div>`;
+    $('#simAccVal').textContent = '—';
+    return;
+  }
+
+  const rows = simCandidates();
+  if (!rows.length) return;
+  if (!sim.key || !rows.some(r => r.key === sim.key)) {
+    sim.key = rows[0].key;
+    sim.acc = null;
+  }
+  const cur = sel.value;
+  sel.innerHTML = rows.map(r =>
+    `<option value="${esc(r.key)}">${esc(r.name)} · ${esc(r.d)} · ${r.c.toFixed(1)} · ${r.a.toFixed(2)}%</option>`
+  ).join('');
+  sel.value = sim.key || cur;
+
+  const base = simBaseAcc();
+  const acc = sim.acc == null ? base : sim.acc;
+  const slider = $('#simAcc');
+  if (slider) slider.value = String(acc);
+  $('#simAccVal').textContent = acc.toFixed(2);
+
+  const idx = simIndexMap().get(sim.key);
+  if (idx == null) { out.innerHTML = ''; return; }
+  const r = simulate(new Map([[idx, acc]]));
+  const up = r.delta > 0.00005, down = r.delta < -0.00005;
+  const pick = rows.find(x => x.key === sim.key);
+
+  const moved = [];
+  if (r.enter.length) moved.push(t('sim.enter', { s: r.enter.map(x => x.n + ' ' + x.d).join('、') }));
+  if (r.leave.length) moved.push(t('sim.leave', { s: r.leave.map(x => x.n + ' ' + x.d).join('、') }));
+
+  out.innerHTML = `
+    <div class="sim-line">
+      <span class="k">${esc(t('sim.rks'))}</span>
+      <span class="v">${r4(r.before)}</span><i>→</i>
+      <span class="nv ${up ? 'up' : down ? 'down' : ''}">${r4(r.after)}</span>
+      <span class="d ${up ? 'up' : down ? 'down' : 'muted'}">${(r.delta >= 0 ? '+' : '') + r.delta.toFixed(4)}</span>
+    </div>
+    <div class="sim-line">
+      <span class="k">${esc(t('sim.song'))}</span>
+      <span class="v">${esc(pick ? pick.name : sim.key)}</span>
+      <span class="d ${acc > base + 0.0005 ? 'up' : acc < base - 0.0005 ? 'down' : 'muted'}">
+        ${base.toFixed(2)}% → ${acc.toFixed(2)}%</span>
+    </div>
+    <div class="sim-line">
+      <span class="k">${esc(t('sim.cutoff'))}</span>
+      <span class="v">${r3(r.cutoffBefore)}</span><i>→</i>
+      <span class="nv">${r3(r.cutoffAfter)}</span>
+    </div>
+    <div class="sim-note">${moved.length ? moved.map(esc).join('<br>') : esc(t('sim.stable'))}</div>
+    ${r.sum3Fixed ? '' : `<div class="sim-note">${esc(t('sim.noOfficial'))}</div>`}`;
+}
+
+function resetSim() {
+  sim.acc = null;
+  paintSim();
 }
 
 function renderSnapshots() {
@@ -1186,6 +1436,7 @@ function switchTab(name) {
 /* ---------------- 渲染总控 ---------------- */
 function renderAll() {
   paintSrv();
+  paintSim();
   renderBanner();
   renderHero();
   renderStats();
@@ -1218,6 +1469,27 @@ function bindEvents() {
   $('#keyBtn').addEventListener('click', openKeyModal);
   $('#modalClose').addEventListener('click', closeKeyModal);
   $('#keyModal').addEventListener('click', e => { if (e.target.id === 'keyModal') closeKeyModal(); });
+
+  // 分享成绩单
+  $('#b30Share').addEventListener('click', openShare);
+  $('#shareClose').addEventListener('click', () => { $('#shareModal').hidden = true; });
+  $('#shareModal').addEventListener('click', e => { if (e.target.id === 'shareModal') $('#shareModal').hidden = true; });
+  $('#shareNick').addEventListener('change', paintShare);
+  $('#shareCopy').addEventListener('click', async () => {
+    const ok = await copyText($('#shareLink').value, t('share.copied'));
+    const m = $('#shareMsg');
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = ok ? '' : t('share.copyFail');
+  });
+  $('#sharedClose').addEventListener('click', () => { $('#sharedModal').hidden = true; });
+  $('#sharedClose2').addEventListener('click', () => { $('#sharedModal').hidden = true; });
+  $('#sharedModal').addEventListener('click', e => { if (e.target.id === 'sharedModal') $('#sharedModal').hidden = true; });
+  $('#sharedCopy').addEventListener('click', async () => {
+    const ok = await copyText(sharedAsText(), t('shared.copied'));
+    const m = $('#sharedMsg');
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = ok ? '' : t('share.copyFail');
+  });
 
   // 设置
   $('#setBtn').addEventListener('click', openSet);
@@ -1354,6 +1626,20 @@ function bindEvents() {
     $$('#pushDiff .chip').forEach(c => c.classList.toggle('on', c === b));
     rerenderPush();
   });
+
+  // 推分模拟
+  $('#simPick').addEventListener('change', e => { sim.key = e.target.value; sim.acc = null; paintSim(); });
+  $('#simAcc').addEventListener('input', e => { sim.acc = Number(e.target.value); paintSim(); });
+  $('#simQuick').addEventListener('click', e => {
+    const b = e.target.closest('[data-to]');
+    if (!b) return;
+    const v = b.dataset.to;
+    const base = simBaseAcc();
+    const next = (v[0] === '+' || v[0] === '-') ? base + parseFloat(v) : parseFloat(v);
+    sim.acc = Math.max(0, Math.min(100, next));
+    paintSim();
+  });
+  $('#simReset').addEventListener('click', resetSim);
 
   // 目标
   $('#planBtn').addEventListener('click', runPlan);
@@ -1538,10 +1824,20 @@ function init() {
     ['#appLink', '#setAppRow'].forEach(sel => { const el = $(sel); if (el) el.remove(); });
   }
 
+  // 分享链接：#d=<payload> 直接弹出只读成绩单（此时别弹教程盖住它）
+  const shared = PL.share && PL.share.parseHash(location.hash);
+  if (shared) setTimeout(() => showShared(shared), 300);
+  // 只改 fragment 不会重新加载文档，所以同一标签里粘贴链接、或点了码之后再扫，
+  // 都不会走 init —— 必须自己听 hashchange
+  window.addEventListener('hashchange', () => {
+    const s2 = PL.share && PL.share.parseHash(location.hash);
+    if (s2) showShared(s2);
+  });
+
   // 首次进入走一遍教程。看过一次就记下来，之后不再打扰（设置里可以重看）
   let seen = '1';
   try { seen = localStorage.getItem(K.tour) || ''; } catch (e) {}
-  if (!seen) setTimeout(openTour, 400);
+  if (!seen && !shared) setTimeout(openTour, 400);
 
   // 曲库异步加载后刷新依赖它的部分
   loadLibrary().then(() => {

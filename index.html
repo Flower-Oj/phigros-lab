@@ -83,6 +83,7 @@
               <span><i class="dot" style="background:var(--rose)"></i><em data-i18n="legend.above16">16 级以上</em></span>
             </div>
             <button class="btn tiny gh" id="b30Export" data-i18n="ov.b30Export" data-i18n-title="ov.b30ExportHint">导出图片</button>
+            <button class="btn tiny gh" id="b30Share" data-i18n="share.btn" data-i18n-title="share.btnHint">分享</button>
           </div>
           <p class="sub" data-i18n="ov.b30Sub">虚线是平均单曲 RKS，右侧断崖处就是天花板</p>
           <div class="chart" id="chartB30"></div>
@@ -196,6 +197,36 @@
           <div id="potential"></div>
         </section>
       </div>
+
+      <section class="card" id="simCard">
+        <div class="card-head">
+          <div>
+            <h3 data-i18n="sim.title">推分模拟</h3>
+            <p class="sub" data-i18n="sim.sub">拖一根准度条，实时看综合 RKS 怎么变、B30 里谁被挤出去</p>
+          </div>
+          <button class="btn tiny gh" id="simReset" data-i18n="sim.reset">重置</button>
+        </div>
+        <div class="sim-body">
+          <div class="sim-left">
+            <label class="field sim-sel"><span data-i18n="sim.pick">选一首</span>
+              <select id="simPick" class="select"></select>
+            </label>
+            <div class="sim-slider">
+              <input type="range" id="simAcc" min="0" max="100" step="0.01" value="99">
+              <div class="sim-val"><b id="simAccVal">—</b><span>%</span></div>
+            </div>
+            <div class="chips sim-quick" id="simQuick">
+              <button class="chip" data-to="-5">−5</button>
+              <button class="chip" data-to="-1">−1</button>
+              <button class="chip" data-to="+1">+1</button>
+              <button class="chip" data-to="+0.5">+0.5</button>
+              <button class="chip" data-to="100">100</button>
+            </div>
+          </div>
+          <div class="sim-right" id="simOut"></div>
+        </div>
+        <p class="hint sim-assume" data-i18n="sim.assume">模拟假设「最近 3 格的成绩不变」：官方 RKS 反解出来的 sum3 = 官方×30 − sum27 保持固定，只重算前 27 格里被你改过的那首。所以模拟值和官方值不是同一个语义，差一点点是假设本身，不是 bug。</p>
+      </section>
 
       <section class="card flush">
         <div class="card-head pad">
@@ -354,6 +385,49 @@
   </footer>
 </div>
 
+<div class="modal" id="shareModal" hidden>
+  <div class="modal-card">
+    <div class="card-head">
+      <h3 data-i18n="share.title">分享成绩单</h3>
+      <button class="icon-btn" id="shareClose" aria-label="关闭" data-i18n-title="ui.close">✕</button>
+    </div>
+    <p class="hint" id="shareWarn"></p>
+    <div class="share-grid">
+      <div class="share-qr" id="shareQrWrap">
+        <div class="qr-img" id="shareQr"></div>
+        <div class="qr-hint" data-i18n="share.qrHint">手机扫码看这份成绩单</div>
+      </div>
+      <div class="share-side">
+        <input id="shareLink" type="text" readonly spellcheck="false">
+        <div class="fields">
+          <button class="btn primary" id="shareCopy" data-i18n="share.copy">复制链接</button>
+          <label class="share-nick"><input type="checkbox" id="shareNick"><span data-i18n="share.withNick">带上昵称</span></label>
+        </div>
+        <p class="hint" id="shareNote"></p>
+      </div>
+    </div>
+    <div class="msg" id="shareMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="sharedModal" hidden>
+  <div class="modal-card wide">
+    <div class="card-head">
+      <h3 id="sharedTitle" data-i18n="shared.title">分享的成绩单</h3>
+      <button class="icon-btn" id="sharedClose" aria-label="关闭" data-i18n-title="ui.close">✕</button>
+    </div>
+    <p class="hint" id="sharedSub"></p>
+    <div class="shared-head" id="sharedHead"></div>
+    <div class="shared-list" id="sharedList"></div>
+    <div class="fields">
+      <button class="btn primary" id="sharedCopy" data-i18n="shared.copyText">复制文字版</button>
+      <button class="btn gh" id="sharedClose2" data-i18n="shared.only">关闭</button>
+    </div>
+    <p class="hint" data-i18n="shared.mergeHint">分享链接里只有准度，没有分数和账号，所以这里只做只读展示，不会改你自己的成绩。</p>
+    <div class="msg" id="sharedMsg"></div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts"></div>
 
 <div class="modal" id="keyModal" hidden>
@@ -471,6 +545,7 @@
 <script src="assets/charts.js"></script>
 <script src="assets/qrcode.js"></script>
 <script src="assets/b30image.js"></script>
+<script src="assets/share.js"></script>
 <script src="assets/ui.js"></script>
 <script src="assets/bridge.js"></script>
 </body>

@@ -714,6 +714,54 @@ function pushSnapshot(force) {
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 /**
+ * 推分模拟：把「某几首的 acc 改成别的值」之后重算综合 RKS。
+ *
+ * 口径（和界面上的说明必须一致，否则模拟值会被当成 bug）：
+ *   官方 RKS 能反解出唯一等式 sum3 = 官方×30 − sum27，这条不能拆。
+ *   所以模拟假设「最近 3 格不变」，sum3 原样固定，只重算 sum27 里被改动的那几项：
+ *     newEst = (sum27' + sum3) / 30
+ *   代价是模拟值天生和官方值不是同一个语义，界面必须把这句话写出来。
+ *
+ * changes: Map<dataIndex, newAcc>。只在副本上算，绝不写回 S.data。
+ */
+function simulate(changes) {
+  const A = analysis();
+  const rows = S.data
+    .map((r, i) => (changes && changes.has(i) ? { ...r, a: clamp(changes.get(i), 0, 100) } : r))
+    .filter(r => r && isNum(r.c) && isNum(r.a))
+    .map(r => ({ ...r, rk: rksOf(r.c, r.a) }))
+    .sort((x, y) => y.rk - x.rk || y.a - x.a);
+
+  const best27 = rows.slice(0, 27);
+  const sum27 = sum(best27, 'rk');
+  const cutoff = best27.length ? best27[best27.length - 1].rk : 0;
+
+  // sum3 默认固定；没有官方 RKS 时它本来就是「前 3 个 Phi」的近似，得跟着重算
+  let sum3 = A.sum3;
+  if (!A.hasOff) {
+    const phi3 = rows.filter(r => r.a >= 99.995).slice(0, 3);
+    sum3 = phi3.length >= 3 ? sum(phi3, 'rk') : null;
+  }
+  const after = best27.length >= 27
+    ? (sum27 + (sum3 != null ? sum3 : cutoff * 3)) / 30
+    : (best27.length ? sum27 / best27.length : 0);
+
+  const k = r => (r.id || r.n) + '|' + r.d;
+  const was = new Set(A.top30.map(k));
+  const now = new Set(rows.slice(0, 30).map(k));
+  return {
+    before: A.eff,
+    after,
+    delta: after - A.eff,
+    cutoffBefore: A.cutoff,
+    cutoffAfter: cutoff,
+    sum3Fixed: A.hasOff,
+    enter: rows.slice(0, 30).filter(r => !was.has(k(r))),
+    leave: A.top30.filter(r => !now.has(k(r)))
+  };
+}
+
+/**
  * 逐曲对比：拿最新快照和「7 天前最近的一条」比，算本周涨分榜。
  * 不到 7 天就退化成和最早那条比，天数会一起返回，界面上照实写。
  * 老版本快照没有 l 字段，返回 stale，让界面提示「再攒一条」而不是报错。
@@ -960,7 +1008,7 @@ Object.assign(PL, {
   RANKS, rksOf, accFor, norm, DEMO, S, K,
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, resolveId, composerOf, chartOf, diagItems,
-  importText, parseLines, exportJSON, pushSnapshot, snapshotDiff,
+  importText, parseLines, exportJSON, pushSnapshot, snapshotDiff, simulate,
   buildPrompt, offlineReport, PRESETS, clientId, VERSION, statsReady, onStats
 });
 })();
