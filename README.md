@@ -175,7 +175,9 @@ node phi.js file data/sample.save --suggest
 
 **AI 教练** — 结构化数据交给 DeepSeek，五种关注点（全面诊断 / 一周计划 / 手法设置 / 单曲攻克 / 只要推分顺序），支持流式输出、追问、停止、复制、下载 md。没有 API Key 时用「离线生成报告」，本地规则引擎直接出诊断。
 
-**数据** — 扫码登录或粘 token 拉取云存档；也可以把 `.save` 文件拖进页面（本地服务解析）；或手动粘贴文本 / JSON。快照记录 RKS 变化，支持导出 JSON。
+**数据** — 扫码登录或粘 token 拉取云存档；也可以把 `.save` 文件拖进页面（本地服务解析）；或手动粘贴文本 / JSON。支持国服 / 国际服切换（`?server=global`，两服账号与云存档完全独立，token 不通用）。快照除了 RKS 总量还存了逐曲成绩（前 60 条 `id|难度|acc`），所以能直接给出「近 N 天逐曲变化」——这一周哪几首推上去了、哪几首掉了，按变化幅度排序。支持导出 JSON。
+
+> **国际服的限制（写在这里免得踩第二次）**：TapTap 的扫码设备码流程要求 `client_id` 与区域匹配，本仓库用的 `rAK3FfdieFob2Nn8Am` 是 Phigros 国服的 TapTap 应用，`accounts.tapapis.com` 会直接回 `invalid_client`。所以**国际服只能用「粘贴 token」**（token 从国际服账号的 LeanCloud 存档接口取），扫码按钮对国际服会给出明确提示而不是甩个 `HTTP 400`。要开通国际服扫码，得在 TapTap 国际区单独建一个应用拿自己的 client_id，再替换 `lib/taptap.js` 里的常量。
 
 > **多语言**：界面文案、图表 tooltip、离线报告、B30 分享图、AI 提示词全部走 `assets/i18n.js` 的词典（中英各约 250 条），曲名与作曲家人名保持原文不翻译。加第三门语言只需在词典每行数组后追加一项、并在 `LANGS` 里登记。
 
