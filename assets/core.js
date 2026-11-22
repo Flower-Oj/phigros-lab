@@ -102,6 +102,7 @@ const DEMO = [
 const S = {
   key: '', model: 'deepseek-chat', preset: 'all',
   data: [], official: null, nick: '', tk: '', source: '', notes: '',
+  server: 'cn',   // 'cn' 国服 / 'global' 国际服：两边是两套 TapTap 应用和两套云存档，token 不通用
   snapshots: [], msgs: [], updatedAt: 0, sum3: null,
   library: null, libById: new Map(), libByName: new Map()
 };
@@ -136,7 +137,7 @@ function saveLS() {
     localStorage.setItem(K.data, JSON.stringify(S.data));
     localStorage.setItem(K.meta, JSON.stringify({
       official: S.official, nick: S.nick, tk: S.tk, source: S.source,
-      updatedAt: S.updatedAt, sum3: S.sum3
+      server: S.server, updatedAt: S.updatedAt, sum3: S.sum3
     }));
     localStorage.setItem(K.snap, JSON.stringify(S.snapshots));
   } catch (e) {
@@ -157,6 +158,7 @@ function loadLS() {
       S.nick = m.nick || '';
       S.tk = m.tk || '';
       S.source = m.source || '';
+      S.server = m.server === 'global' ? 'global' : 'cn';
       S.updatedAt = m.updatedAt || 0;
       S.sum3 = isNum(m.sum3) ? m.sum3 : null;
     }
@@ -698,11 +700,52 @@ function pushSnapshot(force) {
     off: A.hasOff ? Number(S.official.toFixed(4)) : null,
     acc: Number(A.avgAcc30.toFixed(2)),
     phi: A.list.filter(r => r.a >= 99.995).length,
-    n: A.n
+    n: A.n,
+    /* 逐曲成绩：只存「单曲 rk 前 60 条」的 id|难度|acc，用来算这一周哪几首推上去了。
+       60 × ~20 字节 ≈ 1.2KB 一条，80 条 ≈ 100KB，localStorage 放得下。
+       存 acc 而不是 rk：定数可能随版本改，acc 是玩家真正打出来的东西。 */
+    l: A.sorted.slice(0, 60).map(r => [r.id || r.n, r.d, Number(r.a.toFixed(3))])
   });
   if (S.snapshots.length > 80) S.snapshots = S.snapshots.slice(-80);
   saveLS();
   return true;
+}
+
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * 逐曲对比：拿最新快照和「7 天前最近的一条」比，算本周涨分榜。
+ * 不到 7 天就退化成和最早那条比，天数会一起返回，界面上照实写。
+ * 老版本快照没有 l 字段，返回 stale，让界面提示「再攒一条」而不是报错。
+ */
+function snapshotDiff() {
+  const snaps = S.snapshots;
+  if (snaps.length < 2) return null;
+  const cur = snaps[snaps.length - 1];
+  let base = null;
+  for (let i = snaps.length - 2; i >= 0; i--) {
+    if (cur.t - snaps[i].t >= WEEK_MS) { base = snaps[i]; break; }
+  }
+  if (!base) base = snaps[0];
+  if (!base || base === cur) return null;
+
+  const days = Math.max(1, Math.round((cur.t - base.t) / 86400000));
+  const dRks = cur.rks - base.rks;
+  if (!Array.isArray(base.l) || !Array.isArray(cur.l)) {
+    return { base, cur, days, dRks, items: [], stale: true };
+  }
+
+  const prev = new Map(base.l.map(([id, d, a]) => [id + '|' + d, a]));
+  const items = [];
+  for (const [id, d, a] of cur.l) {
+    const from = prev.get(id + '|' + d);
+    if (!isNum(from)) continue;              // 新进前 60 的没得比，不算进榜
+    const delta = a - from;
+    if (Math.abs(delta) < 0.005) continue;   // 0.005 以下基本是判定抖动，不入榜
+    items.push({ id, d, from, to: a, delta });
+  }
+  items.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  return { base, cur, days, dRks, items: items.slice(0, 12), total: items.length, stale: false };
 }
 
 /* ---------------- AI 提示词 ---------------- */
@@ -917,7 +960,7 @@ Object.assign(PL, {
   RANKS, rksOf, accFor, norm, DEMO, S, K,
   saveLS, loadLS, analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, resolveId, composerOf, chartOf, diagItems,
-  importText, parseLines, exportJSON, pushSnapshot,
+  importText, parseLines, exportJSON, pushSnapshot, snapshotDiff,
   buildPrompt, offlineReport, PRESETS, clientId, VERSION, statsReady, onStats
 });
 })();

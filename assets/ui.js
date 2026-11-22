@@ -11,7 +11,7 @@ const {
   $, $$, esc, r2, r3, r4, signed, timeAgo, dateStr, S, K, isNum,
   analysis, ratings, diffCounts, pushRows, planFor, ceiling,
   loadLibrary, coverage, composerOf, diagItems, saveLS, loadLS,
-  importText, exportJSON, pushSnapshot, buildPrompt, offlineReport, PRESETS, clientId,
+  importText, exportJSON, pushSnapshot, snapshotDiff, buildPrompt, offlineReport, PRESETS, clientId,
   chartOf
 } = PL;
 
@@ -397,7 +397,42 @@ function renderDataTable() {
   updateFades();
 }
 
+/* 本周涨分榜：两条快照之间的逐曲对比。
+   曲名按当前成绩表反查，查不到（歌被下架/改名）就直接显示 id，总比空着强。 */
+function renderSnapDiff() {
+  const box = $('#snapDiff');
+  if (!box) return;
+  const d = snapshotDiff();
+  if (!d) {
+    // 一条快照都没有时，下面那句「还没有快照」已经说清楚了，别再重复一遍
+    box.innerHTML = S.snapshots.length === 1 ? `<div class="hint">${esc(t('snap.diffNeedTwo'))}</div>` : '';
+    return;
+  }
+  const nameById = new Map();
+  for (const r of S.data) if (r.id) nameById.set(r.id, r.n);
+  const up = d.dRks > 0.0005, down = d.dRks < -0.0005;
+  const head = `<div class="wk-head">
+      <span class="wk-t">${esc(t('snap.diffTitle', { n: d.days }))}</span>
+      <span class="wk-d ${up ? 'up' : down ? 'down' : 'muted'}">${(d.dRks >= 0 ? '+' : '') + d.dRks.toFixed(3)}</span>
+      <span class="wk-sub">${esc(t('snap.diffRks'))}</span>
+    </div>`;
+
+  if (d.stale) { box.innerHTML = head + `<div class="hint">${esc(t('snap.diffStale'))}</div>`; return; }
+  if (!d.items.length) { box.innerHTML = head + `<div class="hint">${esc(t('snap.diffNone'))}</div>`; return; }
+
+  const rows = d.items.map(it => `<div class="wk-row">
+      <span class="wk-name" title="${esc(it.id)}">${esc(nameById.get(it.id) || it.id)}</span>
+      <span class="wk-rank">${esc(it.d)}</span>
+      <span class="wk-acc">${it.from.toFixed(2)}<i>→</i>${it.to.toFixed(2)}</span>
+      <span class="delta ${it.delta > 0 ? 'up' : 'down'}">${(it.delta >= 0 ? '+' : '') + it.delta.toFixed(3)}</span>
+    </div>`).join('');
+
+  box.innerHTML = head + `<div class="wk-list">${rows}</div>` +
+    (d.total > d.items.length ? `<div class="hint">${esc(t('snap.diffMore', { n: d.total - d.items.length }))}</div>` : '');
+}
+
 function renderSnapshots() {
+  renderSnapDiff();
   const box = $('#snapList');
   const list = S.snapshots.slice().reverse();
   if (!list.length) {
@@ -946,6 +981,34 @@ function applyPayload(j, source) {
   saveLS();
 }
 
+/* 国服 / 国际服：两套 TapTap 应用、两套云存档，后端靠 ?server=global 区分，
+   不带这个参数就是国服。token 也是分服的，切服后旧 token 必然拉不到东西。 */
+const srvQ = (sep = '&') => (S.server === 'global' ? sep + 'server=global' : '');
+
+function paintSrv() {
+  $$('#srvPick .chip').forEach(c => c.classList.toggle('on', c.dataset.srv === S.server));
+  // 国际服目前只有「粘贴 token」这一条能走，提示得跟着服走，否则用户会一直点扫码
+  const hint = $('#srvHint');
+  if (hint) hint.textContent = t(S.server === 'global' ? 'data.globalHint' : 'data.serverHint');
+}
+
+function setServer(srv) {
+  const next = srv === 'global' ? 'global' : 'cn';
+  if (next === S.server) return;
+  S.server = next;
+  // token 分服，留着只会让下一次拉取报个看不懂的错，直接清掉
+  S.tk = '';
+  const tk = $('#token');
+  if (tk) tk.value = '';
+  saveLS();
+  paintSrv();
+  const m = $('#bindMsg');
+  if (m) {
+    m.className = 'msg';
+    m.textContent = t('data.srvSwitched', { name: t(next === 'global' ? 'data.global' : 'data.cn') });
+  }
+}
+
 async function pullToken(tk) {
   const m = $('#bindMsg');
   m.className = 'msg';
@@ -953,7 +1016,7 @@ async function pullToken(tk) {
   try {
     // token 走请求头：query string 会被反代/CDN 的访问日志整行记下来
     // lean=1：不回 b30（它就是 all 的前 30 条）
-    const r = await fetch('/api/phi/all?lean=1', { headers: { 'X-Session-Token': tk } });
+    const r = await fetch('/api/phi/all?lean=1' + srvQ(), { headers: { 'X-Session-Token': tk } });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     applyPayload(j, 'cloud');
@@ -1022,7 +1085,7 @@ async function startLogin() {
   $('#loginCode').textContent = '·····';
   drawLoginQR('');
   try {
-    const r = await fetch('/api/phi/login');
+    const r = await fetch('/api/phi/login' + srvQ('?'));
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     $('#loginCode').textContent = j.userCode;
@@ -1122,6 +1185,7 @@ function switchTab(name) {
 
 /* ---------------- 渲染总控 ---------------- */
 function renderAll() {
+  paintSrv();
   renderBanner();
   renderHero();
   renderStats();
@@ -1337,6 +1401,11 @@ function bindEvents() {
   $('#planTarget').addEventListener('keydown', e => { if (e.key === 'Enter') runPlan(); });
 
   // 数据
+  $('#srvPick').addEventListener('click', e => {
+    const b = e.target.closest('[data-srv]');
+    if (b) setServer(b.dataset.srv);
+  });
+  paintSrv();
   $('#loginBtn').addEventListener('click', startLogin);
   $('#bindBtn').addEventListener('click', bind);
   $('#pullBtn').addEventListener('click', pull);

@@ -263,6 +263,14 @@
             <div><b>2</b><span data-i18n="data.step2">授权后自动填入 token 并拉取</span></div>
             <div><b>3</b><span data-i18n="data.step3">已有 token 也可以直接粘进来</span></div>
           </div>
+          <div class="srvrow">
+            <span data-i18n="data.server">服务器</span>
+            <div class="chips" id="srvPick">
+              <button class="chip on" data-srv="cn" data-i18n="data.cn">国服</button>
+              <button class="chip" data-srv="global" data-i18n="data.global">国际服</button>
+            </div>
+          </div>
+          <p class="sub srvhint" id="srvHint" data-i18n="data.serverHint">国际服玩家选右边；两服的 token 不通用，切换后要重新登录或粘贴对应服的 token。</p>
           <input id="token" type="text" data-i18n-ph="data.tokenPh" placeholder="sessionToken（25 位）" autocomplete="off">
           <div class="fields">
             <button class="btn primary" id="loginBtn" data-i18n="data.login">扫码登录</button>
@@ -322,6 +330,7 @@
           </div>
         </div>
         <p class="sub" data-i18n="data.snapshotSub">每次拉取会自动留一个快照，用来观察 RKS 的实际变化</p>
+        <div id="snapDiff" class="snapdiff"></div>
         <div id="snapList" class="snap-list"></div>
       </section>
 
